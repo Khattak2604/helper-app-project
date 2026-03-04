@@ -1,7 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const { chatWithOllama, SHOP_LEDGER_SYSTEM_PROMPT } = require('../services/ollamaService');
+const path = require('path');
+const fs = require('fs-extra');
+const { chatWithGemini, buildSystemPrompt, SHOP_LEDGER_SYSTEM_PROMPT } = require('../services/geminiService');
 const db = require('../utils/dataStore');
+
+const CONFIG_FILE = path.join(__dirname, '../../data/config.json');
 
 router.post('/', async (req, res) => {
   try {
@@ -16,11 +20,24 @@ router.post('/', async (req, res) => {
       { role: 'user', content: message + customerContext }
     ];
 
+    // Load active languages from config and build dynamic system prompt
+    let systemPrompt = SHOP_LEDGER_SYSTEM_PROMPT;
+    try {
+      let config = {};
+      if (await fs.pathExists(CONFIG_FILE)) {
+        config = await fs.readJson(CONFIG_FILE);
+      }
+      const activeLanguages = config.activeLanguages || ['english'];
+      systemPrompt = await buildSystemPrompt(activeLanguages);
+    } catch (promptErr) {
+      console.warn('Could not build dynamic system prompt, using base prompt:', promptErr.message);
+    }
+
     let parsed;
     let usedAI = false;
 
     try {
-      const aiResponse = await chatWithOllama(messages, SHOP_LEDGER_SYSTEM_PROMPT);
+      const aiResponse = await chatWithGemini(messages, systemPrompt);
       console.log('Raw AI response:', aiResponse);
       const cleaned = aiResponse.replace(/```(?:json)?/gi, '').trim();
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);

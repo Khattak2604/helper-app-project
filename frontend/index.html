@@ -30,9 +30,19 @@
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">Connecting...</span>
         </div>
+        <button class="btn-topbar-action" id="langManagerBtn" title="Language Packs">🌐 Languages</button>
+        <button class="btn-topbar-action btn-setup" id="setupBtn" title="API Key Setup">⚙️ Setup</button>
         <button class="btn-refresh" id="refreshBtn" title="Refresh">↺</button>
       </div>
     </header>
+
+    <!-- API Key Banner (shown when no key is configured) -->
+    <div class="api-key-banner" id="apiKeyBanner">
+      <span>⚠️ No Gemini API key configured.</span>
+      <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer">Get your free key from Google AI Studio</a>
+      <span>using your Gmail account, then click</span>
+      <button onclick="openSetupModal()">⚙️ Setup</button>
+    </div>
 
     <!-- MAIN SPLIT LAYOUT -->
     <div class="main-split">
@@ -57,7 +67,7 @@
             <span class="chat-icon">🤖</span>
             <div>
               <div class="chat-title">AI Ledger Assistant</div>
-              <div class="chat-subtitle">Roman Urdu &amp; English · Powered by Ollama</div>
+              <div class="chat-subtitle">Roman Urdu &amp; English · Powered by Gemini</div>
             </div>
           </div>
           <div class="chat-header-actions">
@@ -165,6 +175,56 @@
       <div class="modal-footer">
         <div class="report-total" id="reportTotalBadge"></div>
         <button class="btn-cancel" id="closeReportBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- API Key Setup Modal -->
+  <div class="modal-overlay" id="setupOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <h3>⚙️ Gemini API Key Setup</h3>
+        <button class="modal-close" id="setupClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="setup-info-box">
+          <p>This app uses <strong>Google Gemini AI</strong> (free tier) for smart chat commands.</p>
+          <p style="margin-top:0.5rem">
+            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noopener noreferrer" class="setup-link">
+              🔑 Click here to get your free Gemini API key — sign in with your Gmail account
+            </a>
+          </p>
+          <p style="margin-top:0.4rem;font-size:0.72rem;color:var(--text3)">No credit card required. The key is stored locally on your device.</p>
+        </div>
+        <div class="form-group">
+          <label class="form-label">Paste your Gemini API Key</label>
+          <input type="password" id="apiKeyInput" class="form-input" placeholder="AIza..." autocomplete="off" />
+        </div>
+        <div id="setupResult" class="form-result"></div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-cancel" id="cancelSetup">Cancel</button>
+        <button class="btn-save" id="saveApiKey">🔑 Save &amp; Test</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Language Manager Modal -->
+  <div class="modal-overlay" id="langManagerOverlay">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <div>
+          <h3>🌐 Language Packs</h3>
+          <p class="modal-subtitle">Download and manage language packs for voice &amp; AI understanding</p>
+        </div>
+        <button class="modal-close" id="langManagerClose">✕</button>
+      </div>
+      <div class="modal-body" id="langManagerBody">
+        <div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>
+      </div>
+      <div class="modal-footer">
+        <span style="font-size:0.72rem;color:var(--text3)">Active packs add vocabulary to AI understanding</span>
+        <button class="btn-cancel" id="closeLangManager">Close</button>
       </div>
     </div>
   </div>

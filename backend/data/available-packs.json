@@ -1,0 +1,32 @@
+[
+  {
+    "code": "english",
+    "name": "English",
+    "nativeName": "English",
+    "version": "1.0.0",
+    "description": "Default English language pack",
+    "voiceCode": "en-US",
+    "builtIn": true,
+    "size": "2 KB"
+  },
+  {
+    "code": "roman-urdu",
+    "name": "Roman Urdu",
+    "nativeName": "رومن اردو",
+    "version": "1.0.0",
+    "description": "Pakistani Roman Urdu — write Urdu in English letters",
+    "voiceCode": "ur-PK",
+    "builtIn": false,
+    "size": "3 KB"
+  },
+  {
+    "code": "punjabi-roman",
+    "name": "Punjabi (Roman)",
+    "nativeName": "پنجابی",
+    "version": "1.0.0",
+    "description": "Roman Punjabi for Punjab region shops",
+    "voiceCode": "pa-PK",
+    "builtIn": false,
+    "size": "3 KB"
+  }
+]

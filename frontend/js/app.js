@@ -633,3 +633,257 @@ async function sendChat() {
 initSpeechRecognition();
 checkStatus();
 loadCustomers();
+checkApiKeyStatus();
+
+/* ===== API KEY SETUP ===== */
+async function checkApiKeyStatus() {
+  try {
+    const res = await fetch(`${API}/config/status`);
+    const json = await res.json();
+    if (json.success && !json.hasApiKey) {
+      $('apiKeyBanner').classList.add('visible');
+    } else {
+      $('apiKeyBanner').classList.remove('visible');
+    }
+  } catch { /* server might not be up yet */ }
+}
+
+function openSetupModal() {
+  $('apiKeyInput').value = '';
+  $('setupResult').className = 'form-result';
+  $('setupOverlay').classList.add('open');
+  $('apiKeyInput').focus();
+}
+function closeSetupModal() { $('setupOverlay').classList.remove('open'); }
+
+$('setupBtn').addEventListener('click', openSetupModal);
+$('setupClose').addEventListener('click', closeSetupModal);
+$('cancelSetup').addEventListener('click', closeSetupModal);
+$('setupOverlay').addEventListener('click', e => { if (e.target === $('setupOverlay')) closeSetupModal(); });
+
+$('saveApiKey').addEventListener('click', async () => {
+  const apiKey = $('apiKeyInput').value.trim();
+  const resultEl = $('setupResult');
+  resultEl.className = 'form-result';
+  if (!apiKey) {
+    resultEl.textContent = 'Please paste your API key.';
+    resultEl.className = 'form-result error';
+    return;
+  }
+  const btn = $('saveApiKey');
+  btn.disabled = true; btn.textContent = 'Testing...';
+  try {
+    const res = await fetch(`${API}/config/apikey`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ apiKey })
+    });
+    const json = await res.json();
+    if (json.success) {
+      resultEl.textContent = json.message;
+      resultEl.className = 'form-result success';
+      $('apiKeyBanner').classList.remove('visible');
+      setTimeout(() => closeSetupModal(), 1500);
+    } else {
+      resultEl.textContent = '❌ ' + json.message;
+      resultEl.className = 'form-result error';
+    }
+  } catch (err) {
+    resultEl.textContent = '❌ Connection error: ' + err.message;
+    resultEl.className = 'form-result error';
+  } finally {
+    btn.disabled = false; btn.textContent = '🔑 Save & Test';
+  }
+});
+
+/* ===== LANGUAGE MANAGER ===== */
+$('langManagerBtn').addEventListener('click', openLangManager);
+$('langManagerClose').addEventListener('click', closeLangManager);
+$('closeLangManager').addEventListener('click', closeLangManager);
+$('langManagerOverlay').addEventListener('click', e => { if (e.target === $('langManagerOverlay')) closeLangManager(); });
+
+function closeLangManager() { $('langManagerOverlay').classList.remove('open'); }
+
+async function openLangManager() {
+  $('langManagerOverlay').classList.add('open');
+  await renderLangManager();
+}
+
+async function renderLangManager() {
+  const body = $('langManagerBody');
+  body.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>';
+  try {
+    const [availRes, activeRes] = await Promise.all([
+      fetch(`${API}/languages/available`),
+      fetch(`${API}/languages/active`)
+    ]);
+    const availJson = await availRes.json();
+    const activeJson = await activeRes.json();
+
+    if (!availJson.success) throw new Error(availJson.message);
+    const packs = availJson.data;
+    const activeCodes = activeJson.success ? activeJson.data : ['english'];
+
+    body.innerHTML = `
+      <div class="lang-section-title">Available Language Packs</div>
+      <div class="lang-packs-grid" id="langPacksGrid">
+        ${packs.map(pack => renderPackCard(pack, activeCodes)).join('')}
+      </div>
+      <div class="lang-section-title" style="margin-top:1rem">Active Languages</div>
+      <p style="font-size:0.75rem;color:var(--text3);margin-bottom:0.75rem">Active language packs add vocabulary to the AI so it understands commands in those languages.</p>
+      <div class="lang-active-list" id="langActiveList">
+        ${packs.filter(p => p.installed).map(pack => renderActiveToggle(pack, activeCodes)).join('')}
+      </div>
+    `;
+
+    // Bind download/remove buttons
+    body.querySelectorAll('[data-download]').forEach(btn => {
+      btn.addEventListener('click', () => downloadPack(btn.dataset.download));
+    });
+    body.querySelectorAll('[data-remove]').forEach(btn => {
+      btn.addEventListener('click', () => removePack(btn.dataset.remove));
+    });
+    body.querySelectorAll('[data-toggle]').forEach(toggle => {
+      toggle.addEventListener('change', () => handleActiveToggle(toggle, activeCodes));
+    });
+  } catch (err) {
+    body.innerHTML = `<div class="empty-state"><p>⚠ ${escHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderPackCard(pack, activeCodes) {
+  const isActive = activeCodes.includes(pack.code);
+  let actionBtn = '';
+  if (pack.builtIn) {
+    actionBtn = `<span class="lang-badge built-in">Built-in</span>`;
+  } else if (pack.installed) {
+    actionBtn = `<button class="lang-btn lang-btn-remove" data-remove="${escHtml(pack.code)}">🗑 Remove</button>`;
+  } else {
+    actionBtn = `<button class="lang-btn lang-btn-download" data-download="${escHtml(pack.code)}">⬇ Download</button>`;
+  }
+
+  return `
+    <div class="lang-pack-card ${pack.installed ? 'installed' : ''}" id="pack-card-${escHtml(pack.code)}">
+      <div class="lang-pack-header">
+        <div class="lang-pack-name">${escHtml(pack.name)}</div>
+        <div class="lang-pack-native">${escHtml(pack.nativeName)}</div>
+      </div>
+      <div class="lang-pack-desc">${escHtml(pack.description)}</div>
+      <div class="lang-pack-meta">
+        <span>v${escHtml(pack.version)}</span>
+        <span>${escHtml(pack.size || '')}</span>
+        <span class="lang-status-badge ${pack.installed ? 'installed' : ''}">${pack.installed ? '✅ Installed' : 'Not Installed'}</span>
+      </div>
+      <div class="lang-pack-actions">${actionBtn}</div>
+    </div>
+  `;
+}
+
+function renderActiveToggle(pack, activeCodes) {
+  const isActive = activeCodes.includes(pack.code);
+  const isEnglish = pack.code === 'english';
+  return `
+    <div class="lang-active-item">
+      <div class="lang-active-info">
+        <span class="lang-active-name">${escHtml(pack.name)}</span>
+        <span class="lang-active-native">${escHtml(pack.nativeName)}</span>
+        ${pack.voiceCode ? `<span class="lang-voice-code">🎙️ ${escHtml(pack.voiceCode)}</span>` : ''}
+      </div>
+      <label class="toggle-switch ${isEnglish ? 'disabled' : ''}">
+        <input type="checkbox" data-toggle="${escHtml(pack.code)}" ${isActive ? 'checked' : ''} ${isEnglish ? 'disabled' : ''} />
+        <span class="toggle-slider"></span>
+      </label>
+    </div>
+  `;
+}
+
+async function downloadPack(code) {
+  const card = $(`pack-card-${code}`);
+  if (card) {
+    card.classList.add('downloading');
+    card.querySelector('.lang-pack-actions').innerHTML = `<span class="lang-downloading"><div class="spinner" style="width:16px;height:16px;border-width:2px"></div> Installing...</span>`;
+  }
+  try {
+    const res = await fetch(`${API}/languages/download/${encodeURIComponent(code)}`, { method: 'POST' });
+    const json = await res.json();
+    if (json.success) {
+      await renderLangManager(); // refresh
+    } else {
+      alert('❌ ' + json.message);
+      if (card) card.classList.remove('downloading');
+    }
+  } catch (err) {
+    alert('❌ Error: ' + err.message);
+    if (card) card.classList.remove('downloading');
+  }
+}
+
+async function removePack(code) {
+  if (!confirm(`Remove "${code}" language pack?`)) return;
+  try {
+    const res = await fetch(`${API}/languages/${encodeURIComponent(code)}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (json.success) {
+      await renderLangManager(); // refresh
+    } else {
+      alert('❌ ' + json.message);
+    }
+  } catch (err) {
+    alert('❌ Error: ' + err.message);
+  }
+}
+
+async function handleActiveToggle(toggle, currentActiveCodes) {
+  const code = toggle.dataset.toggle;
+  let newActive = [...currentActiveCodes];
+  if (toggle.checked) {
+    if (!newActive.includes(code)) newActive.push(code);
+  } else {
+    newActive = newActive.filter(c => c !== code);
+  }
+
+  try {
+    const res = await fetch(`${API}/languages/active`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ activeLanguages: newActive })
+    });
+    const json = await res.json();
+    if (json.success) {
+      // Update voice recognition language based on first non-english active pack
+      updateVoiceLang(json.data);
+    } else {
+      alert('❌ ' + json.message);
+      toggle.checked = !toggle.checked; // revert
+    }
+  } catch (err) {
+    alert('❌ Error: ' + err.message);
+    toggle.checked = !toggle.checked; // revert
+  }
+}
+
+function updateVoiceLang(activeCodes) {
+  // Use the voice code of the first non-English active language if available
+  const langPriorityMap = {
+    'roman-urdu': 'ur-PK',
+    'punjabi-roman': 'pa-PK',
+    'english': 'en-US'
+  };
+  for (const code of activeCodes) {
+    if (code !== 'english' && langPriorityMap[code]) {
+      voiceLang = langPriorityMap[code];
+      if (recognition) recognition.lang = voiceLang;
+      const btn = $('langToggle');
+      if (btn) {
+        btn.textContent = code === 'roman-urdu' ? 'اردو' : code === 'punjabi-roman' ? 'پنجابی' : 'EN';
+        btn.classList.toggle('urdu', code !== 'english');
+      }
+      return;
+    }
+  }
+  // Default to English
+  voiceLang = 'en-US';
+  if (recognition) recognition.lang = voiceLang;
+  const btn = $('langToggle');
+  if (btn) { btn.textContent = 'EN'; btn.classList.remove('urdu'); }
+}

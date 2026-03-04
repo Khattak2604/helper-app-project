@@ -2,4 +2,6 @@ node_modules/
 .env
 *.log
 data/contacts.json
+data/config.json
+data/language-packs/
 .DS_Store
