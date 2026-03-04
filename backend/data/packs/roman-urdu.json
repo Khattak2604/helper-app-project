@@ -1,0 +1,17 @@
+{
+  "code": "roman-urdu",
+  "name": "Roman Urdu",
+  "nativeName": "رومن اردو",
+  "version": "1.0.0",
+  "description": "Pakistani Roman Urdu language pack for shop commands",
+  "voiceCode": "ur-PK",
+  "builtIn": false,
+  "systemPromptAddition": "You also understand Roman Urdu (Urdu written in English letters). Key vocabulary: 'ka/ki/ke' means possessive (Ahmed ka = Ahmed's), 'aaj' means today, 'kal' means yesterday/tomorrow, 'is mahine' means this month, 'hisab' means account/ledger, 'add karo/likhna' means add/record, 'dikhao/batao' means show/display, 'kul/total' means overall total, 'report banao' means generate report, 'sab/tamam' means all, 'naya/new' means new, 'delete karo/hata do' means delete, 'update karo/badlo' means update. Common units: 'bag/thaila' means bag, 'kg' means kilogram, 'wala/each' means per unit. Always handle Roman Urdu input naturally and infer dates from context.",
+  "exampleCommands": [
+    "Ahmed ka aaj ka hisab add karo — atta 2 bag 1200 each",
+    "Ali ka record dikhao",
+    "Sab customers dikhao",
+    "Sara ka is mahine ka report banao",
+    "Ahmed ka kul hisab kya hai"
+  ]
+}

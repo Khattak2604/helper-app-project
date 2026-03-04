@@ -1,0 +1,17 @@
+{
+  "code": "english",
+  "name": "English",
+  "nativeName": "English",
+  "version": "1.0.0",
+  "description": "Default English language pack",
+  "voiceCode": "en-US",
+  "builtIn": true,
+  "systemPromptAddition": "",
+  "exampleCommands": [
+    "Add customer Ali, phone 0321-1234567, Lahore",
+    "Show all customers",
+    "Get Ahmed's record",
+    "Generate monthly report for Sara",
+    "What is Ahmed's total balance?"
+  ]
+}

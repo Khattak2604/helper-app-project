@@ -1,0 +1,17 @@
+{
+  "code": "punjabi-roman",
+  "name": "Punjabi (Roman)",
+  "nativeName": "پنجابی",
+  "version": "1.0.0",
+  "description": "Roman Punjabi for Punjab region shops",
+  "voiceCode": "pa-PK",
+  "builtIn": false,
+  "systemPromptAddition": "You also understand Roman Punjabi (Punjabi written in English letters). Key vocabulary: 'da/di/de' means possessive (Ahmed da = Ahmed's), 'aj' means today, 'kal' means yesterday/tomorrow, 'is mahine' means this month, 'hisab' means account/ledger, 'pa/likhna' means add/record, 'dikha/das' means show/display, 'kul/total' means overall total, 'report bana' means generate report, 'sab/tamam' means all, 'nawa/new' means new, 'mita do/delete karo' means delete, 'badal do/update karo' means update, 'labh/dhundh' means search/find. Common units: 'bori/bag' means bag, 'kilo/kg' means kilogram. Always handle Roman Punjabi input naturally.",
+  "exampleCommands": [
+    "Ahmed da aj da hisab pa — atta 2 bag 1200 each",
+    "Ali da record dikha",
+    "Sab customers dikha",
+    "Sara da is mahine da report bana",
+    "Ahmed da kul hisab ki hai"
+  ]
+}

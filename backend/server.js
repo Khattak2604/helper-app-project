@@ -4,14 +4,32 @@ const dotenv = require('dotenv');
 const bodyParser = require('body-parser');
 const path = require('path');
 const fs = require('fs-extra');
+const rateLimit = require('express-rate-limit');
 
 dotenv.config();
 
 const app = express();
 
+// Load API key from data/config.json on startup if not already in environment
+async function loadConfigApiKey() {
+  const configFile = path.join(__dirname, '../data/config.json');
+  try {
+    if (!process.env.GEMINI_API_KEY && await fs.pathExists(configFile)) {
+      const config = await fs.readJson(configFile);
+      if (config.geminiApiKey) {
+        process.env.GEMINI_API_KEY = config.geminiApiKey;
+        console.log('🔑 Loaded Gemini API key from data/config.json');
+      }
+    }
+  } catch (err) {
+    console.warn('Could not load config.json:', err.message);
+  }
+}
+
 // Ensure data directory exists on startup
 const DATA_DIR = path.join(__dirname, '../data');
 fs.ensureDirSync(DATA_DIR);
+fs.ensureDirSync(path.join(DATA_DIR, 'language-packs'));
 const CUSTOMERS_FILE = path.join(DATA_DIR, 'customers.json');
 if (!fs.pathExistsSync(CUSTOMERS_FILE)) {
   fs.writeJsonSync(CUSTOMERS_FILE, [], { spaces: 2 });
@@ -28,7 +46,9 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 // API Routes
 app.use('/api/customers', require('./routes/customers'));
-app.use('/api/chat', require('./routes/chat'));
+app.use('/api/chat', rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false }), require('./routes/chat'));
+app.use('/api/config', rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false }), require('./routes/config'));
+app.use('/api/languages', rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false }), require('./routes/languages'));
 
 // Catch-all: serve frontend for non-API routes
 app.get('*', (req, res) => {
@@ -42,8 +62,16 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`\n🚀 Server running at http://localhost:${PORT}`);
-  console.log(`🤖 Using Ollama model: ${process.env.OLLAMA_MODEL || 'deepseek-v3.1:671b-cloud'}`);
-  console.log(`🏪 Dukan Ledger — Shop Record Manager ready!\n`);
+
+// Start server after loading config
+loadConfigApiKey().then(() => {
+  app.listen(PORT, () => {
+    console.log(`\n🚀 Server running at http://localhost:${PORT}`);
+    if (process.env.GEMINI_API_KEY) {
+      console.log('🤖 Gemini API key: configured ✅');
+    } else {
+      console.log('⚠️  Gemini API key: NOT configured — open the app and click ⚙️ Setup to add your key');
+    }
+    console.log('🏪 Dukan Ledger — Shop Record Manager ready!\n');
+  });
 });
