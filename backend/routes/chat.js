@@ -1,83 +1,46 @@
 const express = require('express');
 const router = express.Router();
-const { chatWithOllama } = require('../services/ollamaService');
+const { chatWithOllama, SHOP_LEDGER_SYSTEM_PROMPT } = require('../services/ollamaService');
 const db = require('../utils/dataStore');
-
-const SYSTEM_PROMPT = `You are a contacts database assistant. Parse user commands into JSON for CRUD operations.
-
-Database fields: id, name, phone, email, address
-
-CRITICAL: Respond with ONLY raw JSON. No markdown. No backticks. No explanation. Just the JSON object.
-
-JSON format:
-{"action":"create|read|update|delete|search","filters":{},"updates":{},"newRecord":{},"message":"brief description"}
-
-RULES:
-- "create": extract ALL mentioned fields into "newRecord". Name = just the person's actual name (not "hamza with" - just "hamza")
-- "read/search": extract search criteria into "filters". Empty filters = show all
-- "update": search criteria in "filters", changed values in "updates"  
-- "delete": search criteria in "filters"
-- Only include fields that were actually mentioned by the user
-- Clean the data: phone numbers digits only or with dashes, names are proper case
-
-EXAMPLES:
-User: "add a new person named hamza with phone 2222223333 email hamza@gmail.com and address islamabad"
-Response: {"action":"create","filters":{},"updates":{},"newRecord":{"name":"Hamza","phone":"2222223333","email":"hamza@gmail.com","address":"Islamabad"},"message":"Creating new record for Hamza"}
-
-User: "show all records"
-Response: {"action":"read","filters":{},"updates":{},"newRecord":{},"message":"Fetching all records"}
-
-User: "find records with name Ali"
-Response: {"action":"search","filters":{"name":"Ali"},"updates":{},"newRecord":{},"message":"Searching for Ali"}
-
-User: "update phone for Sara to 0300-9876543"
-Response: {"action":"update","filters":{"name":"Sara"},"updates":{"phone":"0300-9876543"},"newRecord":{},"message":"Updating Sara's phone number"}
-
-User: "delete hamza"
-Response: {"action":"delete","filters":{"name":"Hamza"},"updates":{},"newRecord":{},"message":"Deleting record for Hamza"}
-`;
 
 router.post('/', async (req, res) => {
   try {
     const { message, history = [] } = req.body;
     if (!message) return res.status(400).json({ success: false, message: 'Message required' });
 
-    // Get current data context
-    const allData = await db.readAll();
-    const dataContext = `\nCurrent database has ${allData.length} records. IDs available: ${allData.map(r => `${r.name}(id:${r.id})`).join(', ')}`;
+    const allCustomers = await db.getAllCustomers();
+    const customerContext = `\nCurrent shop has ${allCustomers.length} customers: ${allCustomers.map(c => `${c.name}(id:${c.id})`).join(', ') || 'none'}`;
 
-    // Build messages for Ollama
     const messages = [
-      ...history.slice(-6), // keep last 3 turns
-      { role: 'user', content: message + dataContext }
+      ...history.slice(-6),
+      { role: 'user', content: message + customerContext }
     ];
 
-    let aiResponse;
     let parsed;
     let usedAI = false;
 
     try {
-      aiResponse = await chatWithOllama(messages, SYSTEM_PROMPT);
+      const aiResponse = await chatWithOllama(messages, SHOP_LEDGER_SYSTEM_PROMPT);
       console.log('Raw AI response:', aiResponse);
-      // Extract JSON - strip any markdown code fences first
       const cleaned = aiResponse.replace(/```(?:json)?/gi, '').trim();
       const jsonMatch = cleaned.match(/\{[\s\S]*\}/);
       if (!jsonMatch) throw new Error('AI returned no JSON');
       parsed = JSON.parse(jsonMatch[0]);
       usedAI = true;
     } catch (aiErr) {
-      console.warn('AI failed, using smart fallback. Reason:', aiErr.message);
+      console.warn('AI failed, using fallback parser. Reason:', aiErr.message);
       parsed = fallbackParser(message);
       parsed.aiError = aiErr.message;
     }
 
-    // Execute the action
-    const result = await executeAction(parsed, allData);
+    const result = await executeIntent(parsed, allCustomers);
 
     res.json({
       success: true,
-      intent: parsed,
-      result,
+      intent: parsed.intent,
+      params: parsed.params,
+      message: parsed.message,
+      data: result,
       usedAI,
       aiError: parsed.aiError || null
     });
@@ -88,162 +51,201 @@ router.post('/', async (req, res) => {
   }
 });
 
-async function executeAction(parsed, allData) {
-  const { action, filters = {}, updates = {}, newRecord = {} } = parsed;
+async function findCustomerByName(name) {
+  if (!name) return null;
+  const customers = await db.loadData();
+  const lower = name.toLowerCase();
+  return customers.find(c => c.name.toLowerCase().includes(lower)) || null;
+}
 
-  switch (action) {
-    case 'create': {
-      if (!newRecord.name) return { type: 'error', message: 'Please provide at least a name to create a record.' };
-      const created = await db.createRecord(newRecord);
-      return { type: 'created', record: created, message: `✅ Created record for **${created.name}**` };
+async function executeIntent(parsed, allCustomers) {
+  const { intent, params = {} } = parsed;
+  const today = new Date().toISOString().slice(0, 10);
+
+  switch (intent) {
+    case 'ADD_CUSTOMER': {
+      if (!params.name) return { type: 'error', message: 'Customer name is required.' };
+      const created = await db.createCustomer({
+        name: params.name,
+        phone: params.phone || '',
+        extraInfo: params.extraInfo || ''
+      });
+      return { type: 'customer_created', customer: created, message: `✅ Customer **${created.name}** created!` };
     }
 
-    case 'read':
-    case 'search': {
-      const cleanFilters = Object.fromEntries(Object.entries(filters).filter(([k, v]) => v));
-      let records;
-      if (Object.keys(cleanFilters).length === 0) {
-        records = await db.readAll();
-      } else {
-        records = await db.findRecords(cleanFilters);
-      }
+    case 'ADD_DAILY_RECORD': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+
+      const date = params.date || today;
+      const items = (params.items || []).map(item => ({
+        description: item.description || '',
+        qty: Number(item.qty) || 1,
+        price: Number(item.price) || 0
+      }));
+
+      if (!items.length) return { type: 'error', message: 'No items provided for the record.' };
+
+      const updated = await db.addOrUpdateDailyRecord(customer.id, date, items, params.note || '');
+      const dayRecord = updated.dailyRecords.find(d => d.date === date);
       return {
-        type: 'records',
-        records,
-        message: records.length === 0
-          ? '❌ No records found matching your search.'
-          : `📋 Found **${records.length}** record(s)`
+        type: 'daily_record_added',
+        customer: updated,
+        date,
+        dayRecord,
+        message: `✅ Record added for **${customer.name}** on ${date}. Day total: PKR ${dayRecord ? dayRecord.dayTotal : 0}`
       };
     }
 
-    case 'update': {
-      const cleanFilters = Object.fromEntries(Object.entries(filters).filter(([k, v]) => v));
-      const cleanUpdates = Object.fromEntries(Object.entries(updates).filter(([k, v]) => v));
-
-      if (Object.keys(cleanUpdates).length === 0) {
-        return { type: 'error', message: 'Please tell me what fields to update.' };
-      }
-
-      // If ID provided directly
-      if (cleanFilters.id) {
-        const updated = await db.updateRecord(cleanFilters.id, cleanUpdates);
-        if (!updated) return { type: 'error', message: 'Record not found with that ID.' };
-        return { type: 'updated', record: updated, message: `✅ Updated record for **${updated.name}**` };
-      }
-
-      // Search first
-      const matches = await db.findRecords(cleanFilters);
-      if (matches.length === 0) return { type: 'error', message: 'No matching records found to update.' };
-      if (matches.length > 1) {
-        return { type: 'ambiguous', records: matches, updates: cleanUpdates, message: `⚠️ Found **${matches.length}** matching records. Please tell me which ID to update.` };
-      }
-
-      // Single match - update it
-      const updated = await db.updateRecord(matches[0].id, cleanUpdates);
-      return { type: 'updated', record: updated, message: `✅ Updated record for **${updated.name}**` };
+    case 'GET_CUSTOMER': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+      const full = await db.getCustomerById(customer.id);
+      return { type: 'customer_detail', customer: full, message: `📋 Showing record for **${full.name}**` };
     }
 
-    case 'delete': {
-      const cleanFilters = Object.fromEntries(Object.entries(filters).filter(([k, v]) => v));
+    case 'GET_ALL_CUSTOMERS': {
+      const customers = await db.getAllCustomers();
+      return { type: 'all_customers', customers, message: `📋 Found **${customers.length}** customer(s)` };
+    }
 
-      if (cleanFilters.id) {
-        const deleted = await db.deleteRecord(cleanFilters.id);
-        if (!deleted) return { type: 'error', message: 'Record not found.' };
-        return { type: 'deleted', record: deleted, message: `🗑️ Deleted record for **${deleted.name}**` };
+    case 'GET_DAILY_RECORDS': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+      const full = await db.getCustomerById(customer.id);
+      let records = full.dailyRecords || [];
+      if (params.month) {
+        records = records.filter(d => d.date && d.date.startsWith(params.month));
       }
+      return { type: 'daily_records', customer: full, records, message: `📋 Showing ${records.length} record(s) for **${full.name}**` };
+    }
 
-      const matches = await db.findRecords(cleanFilters);
-      if (matches.length === 0) return { type: 'error', message: 'No matching records found to delete.' };
-      if (matches.length > 1) {
-        return { type: 'ambiguous', records: matches, message: `⚠️ Found **${matches.length}** matching records. Please specify an ID to delete.` };
-      }
+    case 'GET_OVERALL_TOTAL': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+      const full = await db.getCustomerById(customer.id);
+      return { type: 'overall_total', customer: full, total: full.overallTotal, message: `💰 **${full.name}** ka kul hisab: PKR **${full.overallTotal}**` };
+    }
 
-      const deleted = await db.deleteRecord(matches[0].id);
-      return { type: 'deleted', record: deleted, message: `🗑️ Deleted record for **${deleted.name}**` };
+    case 'GENERATE_MONTHLY_REPORT': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+      const month = params.month || today.slice(0, 7);
+      const report = await db.getMonthlyReport(customer.id, month);
+      return { type: 'monthly_report', report, message: `📊 Monthly report for **${customer.name}** — ${month}` };
+    }
+
+    case 'UPDATE_CUSTOMER': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+      const updated = await db.updateCustomer(customer.id, params.updates || {});
+      return { type: 'customer_updated', customer: updated, message: `✅ **${updated.name}** ka record update ho gaya` };
+    }
+
+    case 'DELETE_CUSTOMER': {
+      if (!params.customerName) return { type: 'error', message: 'Customer name is required.' };
+      const customer = await findCustomerByName(params.customerName);
+      if (!customer) return { type: 'error', message: `Customer "${params.customerName}" not found.` };
+      const deleted = await db.deleteCustomer(customer.id);
+      return { type: 'customer_deleted', customer: deleted, message: `🗑️ **${deleted.name}** ka record delete ho gaya` };
+    }
+
+    case 'SEARCH_CUSTOMER': {
+      const results = await db.searchCustomers(params.query || '');
+      const summaries = results.map(c => {
+        const overallTotal = (c.dailyRecords || []).reduce((sum, d) => sum + (d.dayTotal || 0), 0);
+        return { id: c.id, name: c.name, phone: c.phone, overallTotal };
+      });
+      return { type: 'search_results', customers: summaries, message: `🔍 Found **${summaries.length}** customer(s)` };
     }
 
     default:
-      return { type: 'info', message: parsed.message || "I didn't understand that. Try: 'add', 'show', 'update', or 'delete' a record." };
+      return { type: 'info', message: parsed.message || "Samajh nahi aaya. Try: 'Add customer', 'Show all', 'Ahmed ka record dikhao'" };
   }
 }
 
-// Smart fallback parser - handles natural language without AI
 function fallbackParser(message) {
   const msg = message.toLowerCase();
-  const parsed = { action: 'unknown', filters: {}, updates: {}, newRecord: {}, message: '' };
+  const today = new Date().toISOString().slice(0, 10);
 
-  // ── Detect action ──────────────────────────────────────────────
-  if (/\b(add|create|new|insert|register|make)\b/.test(msg)) parsed.action = 'create';
-  else if (/\b(delete|remove|erase|drop)\b/.test(msg)) parsed.action = 'delete';
-  else if (/\b(update|change|edit|modify|set|rename|fix|correct)\b/.test(msg)) parsed.action = 'update';
-  else if (/\b(show|list|get|find|search|fetch|display|view|all records)\b/.test(msg)) parsed.action = 'read';
-
-  // ── Field extractors ───────────────────────────────────────────
-
-  // NAME: "named X", "name X", "person X", "for X" — stops at keywords
-  const namePatterns = [
-    /(?:named?|person|for|called)\s+([a-z][a-z\s]{1,30}?)(?:\s+(?:with|phone|email|address|and|,|$))/i,
-    /(?:named?|person|for|called)\s+([a-z][a-z\s]{1,20}?)(?:\s*$)/i,
-  ];
-  for (const pat of namePatterns) {
-    const m = message.match(pat);
-    if (m) { parsed._name = m[1].trim(); break; }
+  // ADD_DAILY_RECORD pattern
+  if (/\b(add|likhna|hisab add|record add)\b/.test(msg) && /\b(aaj|today|kal|yesterday)\b/.test(msg)) {
+    const nameMatch = message.match(/^([A-Za-z]+)/);
+    return {
+      intent: 'ADD_DAILY_RECORD',
+      params: { customerName: nameMatch ? nameMatch[1] : '', date: today, items: [], note: '' },
+      message: 'Adding daily record (fallback)'
+    };
   }
 
-  // PHONE: any sequence of digits, dashes, spaces 7-15 chars
-  const phoneMatch = message.match(/(?:phone(?:\s*(?:no|number|#)?)?[\s:]+)([0-9\s\-\+\(\)]{7,20})/i)
-    || message.match(/\b([0-9]{4}[\-\s]?[0-9]{3,8})\b/);
-  if (phoneMatch) parsed._phone = phoneMatch[1].trim().replace(/\s+/g, '');
-
-  // EMAIL: standard email pattern
-  const emailMatch = message.match(/([a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,})/);
-  if (emailMatch) parsed._email = emailMatch[1].trim();
-
-  // ADDRESS: after "address" keyword — grab rest of string or until next keyword
-  const addressMatch = message.match(/(?:address(?:ed)?|from|in|at|location)\s+([a-z][a-z\s,\.]{3,60}?)(?:\s*(?:phone|email|and\s+phone|and\s+email|$))/i)
-    || message.match(/address\s+(.+)$/i);
-  if (addressMatch) parsed._address = addressMatch[1].trim().replace(/\.$/, '');
-
-  // ── UPDATE: detect "set/change X to Y" or "update X for name" ──
-  const setMatch = message.match(/(?:set|change|update)\s+(name|phone|email|address)\s+(?:to|=)\s+(.+?)(?:\s+for\s+|$)/i);
-  const toMatch = message.match(/(?:set|change|update)\s+.+?\s+to\s+(.+)/i);
-
-  // ── Build output based on action ──────────────────────────────
-  if (parsed.action === 'create') {
-    parsed.newRecord = {};
-    if (parsed._name)    parsed.newRecord.name    = parsed._name;
-    if (parsed._phone)   parsed.newRecord.phone   = parsed._phone;
-    if (parsed._email)   parsed.newRecord.email   = parsed._email;
-    if (parsed._address) parsed.newRecord.address = parsed._address;
-
-  } else if (parsed.action === 'update') {
-    // What field to update
-    if (setMatch) {
-      parsed.updates[setMatch[1].toLowerCase()] = setMatch[2].trim();
-    } else {
-      if (parsed._phone)   parsed.updates.phone   = parsed._phone;
-      if (parsed._email)   parsed.updates.email   = parsed._email;
-      if (parsed._address) parsed.updates.address = parsed._address;
-    }
-    // Who to update (name or email as filter)
-    const forMatch = message.match(/(?:for|of)\s+([a-z][a-z\s]{1,30}?)(?:\s+(?:to|set|with|$))/i);
-    if (forMatch) parsed.filters.name = forMatch[1].trim();
-    else if (parsed._name) parsed.filters.name = parsed._name;
-
-  } else if (parsed.action === 'delete') {
-    if (parsed._name)  parsed.filters.name  = parsed._name;
-    if (parsed._email) parsed.filters.email = parsed._email;
-    if (parsed._phone) parsed.filters.phone = parsed._phone;
-
-  } else if (parsed.action === 'read') {
-    if (parsed._name)  parsed.filters.name  = parsed._name;
-    if (parsed._email) parsed.filters.email = parsed._email;
-    if (parsed._phone) parsed.filters.phone = parsed._phone;
+  // GET_ALL_CUSTOMERS
+  if (/\b(sab|all|tamam|show all|dikhao sab)\b/.test(msg)) {
+    return { intent: 'GET_ALL_CUSTOMERS', params: {}, message: 'Showing all customers (fallback)' };
   }
 
-  parsed.message = `Smart fallback parsed action: ${parsed.action}`;
-  console.log('Fallback parsed:', JSON.stringify(parsed, null, 2));
-  return parsed;
+  // GET_OVERALL_TOTAL
+  if (/\b(kul|total|overall|hisab kya hai)\b/.test(msg)) {
+    const nameMatch = message.match(/([A-Za-z]+)\s+ka/i) || message.match(/for\s+([A-Za-z]+)/i);
+    return {
+      intent: 'GET_OVERALL_TOTAL',
+      params: { customerName: nameMatch ? nameMatch[1] : '' },
+      message: 'Getting overall total (fallback)'
+    };
+  }
+
+  // GENERATE_MONTHLY_REPORT
+  if (/\b(report|mahine ka|monthly)\b/.test(msg)) {
+    const nameMatch = message.match(/([A-Za-z]+)\s+ka/i) || message.match(/for\s+([A-Za-z]+)/i);
+    const monthMatch = message.match(/(\d{4}-\d{2})/);
+    return {
+      intent: 'GENERATE_MONTHLY_REPORT',
+      params: { customerName: nameMatch ? nameMatch[1] : '', month: monthMatch ? monthMatch[1] : today.slice(0, 7) },
+      message: 'Generating monthly report (fallback)'
+    };
+  }
+
+  // GET_CUSTOMER
+  if (/\b(dikhao|show|record|get)\b/.test(msg)) {
+    const nameMatch = message.match(/([A-Za-z]+)\s+ka/i) || message.match(/for\s+([A-Za-z]+)/i) || message.match(/show\s+([A-Za-z]+)/i);
+    return {
+      intent: 'GET_CUSTOMER',
+      params: { customerName: nameMatch ? nameMatch[1] : '' },
+      message: 'Getting customer record (fallback)'
+    };
+  }
+
+  // ADD_CUSTOMER
+  if (/\b(add|naya|new|create)\b/.test(msg) && /\b(customer|grahak)\b/.test(msg)) {
+    const nameMatch = message.match(/(?:named?|customer)\s+([A-Za-z]+)/i);
+    const phoneMatch = message.match(/(\d[\d\-]{7,})/);
+    return {
+      intent: 'ADD_CUSTOMER',
+      params: { name: nameMatch ? nameMatch[1] : '', phone: phoneMatch ? phoneMatch[1] : '', extraInfo: '' },
+      message: 'Adding customer (fallback)'
+    };
+  }
+
+  // DELETE_CUSTOMER
+  if (/\b(delete|remove|hata|erase)\b/.test(msg)) {
+    const nameMatch = message.match(/(?:delete|remove|for)\s+([A-Za-z]+)/i) || message.match(/([A-Za-z]+)\s+ka/i);
+    return {
+      intent: 'DELETE_CUSTOMER',
+      params: { customerName: nameMatch ? nameMatch[1] : '' },
+      message: 'Deleting customer (fallback)'
+    };
+  }
+
+  return {
+    intent: 'UNKNOWN',
+    params: {},
+    message: "Samajh nahi aaya. Try: 'Show all customers' or 'Ahmed ka record dikhao'"
+  };
 }
 
 module.exports = router;

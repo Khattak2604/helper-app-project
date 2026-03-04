@@ -3,36 +3,32 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>DataBot AI Manager</title>
+  <title>🏪 Dukan Ledger — Shop Record Manager</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;600;700;800&display=swap" rel="stylesheet" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="css/styles.css" />
 </head>
 <body>
   <div class="app">
 
-    <!-- TOP HEADER BAR -->
+    <!-- TOP HEADER -->
     <header class="topbar">
       <div class="topbar-brand">
-        <span class="brand-icon">◈</span>
-        <span class="brand-name">DataBot</span>
-        <span class="brand-sub">AI Manager</span>
+        <span class="brand-icon">🏪</span>
+        <span class="brand-name">Dukan Ledger</span>
+        <span class="brand-sub">Shop Record Manager</span>
       </div>
       <div class="topbar-center">
         <div class="search-wrap">
-          <span class="search-icon">⌕</span>
-          <input type="text" id="globalSearch" class="search-input" placeholder="Search all records..." />
+          <span class="search-icon">🔍</span>
+          <input type="text" id="globalSearch" class="search-input" placeholder="Search customers by name or phone..." />
         </div>
       </div>
       <div class="topbar-right">
-        <span class="record-count" id="recordCount">0 records</span>
+        <span class="customer-count" id="customerCount">0 customers</span>
         <div class="status-pill" id="statusPill">
           <span class="status-dot" id="statusDot"></span>
           <span id="statusText">Connecting...</span>
-        </div>
-        <div class="model-pill">
-          <span class="model-icon">◎</span>
-          <span id="modelName">deepseek-v3.1</span>
         </div>
         <button class="btn-refresh" id="refreshBtn" title="Refresh">↺</button>
       </div>
@@ -41,94 +37,58 @@
     <!-- MAIN SPLIT LAYOUT -->
     <div class="main-split">
 
-      <!-- LEFT PANEL: Dashboard + Add Form -->
+      <!-- LEFT PANEL — Dashboard -->
       <div class="left-panel">
-
-        <!-- DATA TABLE SECTION -->
-        <div class="panel-section table-section">
-          <div class="section-header">
-            <h2 class="section-title">📊 Records</h2>
-            <div class="filter-row">
-              <select id="filterField" class="filter-select">
-                <option value="">All Fields</option>
-                <option value="name">Name</option>
-                <option value="phone">Phone</option>
-                <option value="email">Email</option>
-                <option value="address">Address</option>
-              </select>
-              <input type="text" id="filterValue" class="filter-input" placeholder="Filter value..." />
-              <button class="btn-filter" id="applyFilter">Apply</button>
-              <button class="btn-clear" id="clearFilter">Clear</button>
-            </div>
-          </div>
-          <div class="table-container" id="tableContainer">
-            <div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>
-          </div>
+        <div class="panel-header">
+          <h2 class="panel-title">👥 Customers</h2>
+          <button class="btn-add-customer" id="addCustomerBtn">+ Add Customer</button>
         </div>
 
-        <!-- ADD RECORD SECTION -->
-        <div class="panel-section add-section">
-          <div class="section-header collapsible" id="addSectionToggle">
-            <h2 class="section-title">✦ Add New Record</h2>
-            <span class="collapse-arrow" id="collapseArrow">▾</span>
-          </div>
-          <div class="add-form" id="addFormBody">
-            <div class="form-row">
-              <div class="form-group">
-                <label class="form-label">Full Name *</label>
-                <input type="text" id="addName" class="form-input" placeholder="e.g. Sagheer Khan" />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Phone</label>
-                <input type="text" id="addPhone" class="form-input" placeholder="e.g. 0311-1234567" />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Email</label>
-                <input type="email" id="addEmail" class="form-input" placeholder="e.g. sagheer@gmail.com" />
-              </div>
-              <div class="form-group">
-                <label class="form-label">Address</label>
-                <input type="text" id="addAddress" class="form-input" placeholder="e.g. Nowshera KPK" />
-              </div>
-              <button class="btn-submit" id="submitAdd">✦ Add Record</button>
-            </div>
-            <div id="addResult" class="form-result"></div>
-          </div>
+        <!-- Customer List -->
+        <div class="customer-list" id="customerList">
+          <div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>
         </div>
-
       </div>
 
-      <!-- RIGHT PANEL: AI Chat -->
+      <!-- RIGHT PANEL — Chatbot -->
       <div class="right-panel">
         <div class="chat-header">
           <div class="chat-header-left">
-            <span class="chat-icon">◈</span>
+            <span class="chat-icon">🤖</span>
             <div>
-              <div class="chat-title">AI Chat Assistant</div>
-              <div class="chat-subtitle">Powered by Ollama Cloud · deepseek-v3.1</div>
+              <div class="chat-title">AI Ledger Assistant</div>
+              <div class="chat-subtitle">Roman Urdu &amp; English · Powered by Ollama</div>
             </div>
           </div>
-          <button class="btn-clear-chat" id="clearChatBtn" title="Clear chat">⌫ Clear</button>
+          <div class="chat-header-actions">
+            <button class="btn-lang-toggle" id="langToggle" title="Toggle language">EN</button>
+            <button class="btn-clear-chat" id="clearChatBtn">⌫ Clear</button>
+          </div>
         </div>
 
         <div class="chat-messages" id="chatMessages">
           <div class="chat-msg bot">
-            <div class="msg-avatar">◈</div>
+            <div class="msg-avatar">🤖</div>
             <div class="msg-bubble">
-              <p>Hello! I'm your AI data assistant. I can create, find, update and delete records. Try:</p>
+              <p>Assalam-o-Alaikum! Main aapka Dukan Ledger Assistant hoon. Try karo:</p>
               <div class="example-cmds">
-                <button class="example-btn" onclick="fillChat(this)">Add new person named Ahmed with phone 0321-1234567 email ahmed@gmail.com address Karachi</button>
-                <button class="example-btn" onclick="fillChat(this)">Show all records</button>
-                <button class="example-btn" onclick="fillChat(this)">Find records with name Ali</button>
-                <button class="example-btn" onclick="fillChat(this)">Update phone for Sara to 0300-9876543</button>
-                <button class="example-btn" onclick="fillChat(this)">Delete the record for Ali Khan</button>
+                <button class="example-btn" onclick="fillChat(this)">Add customer Ali, phone 0321-1234567, Lahore</button>
+                <button class="example-btn" onclick="fillChat(this)">Sab customers dikhao</button>
+                <button class="example-btn" onclick="fillChat(this)">Ahmed ka aaj ka hisab add karo — atta 2 bag 1200 each</button>
+                <button class="example-btn" onclick="fillChat(this)">Ahmed ka kul hisab kya hai</button>
+                <button class="example-btn" onclick="fillChat(this)">Sara ka is mahine ka report banao</button>
               </div>
             </div>
           </div>
         </div>
 
         <div class="chat-input-area">
-          <textarea id="chatInput" class="chat-textarea" placeholder="Type a command... e.g. 'Add new person named Hamza with phone 0312-1234567'" rows="1"></textarea>
+          <textarea id="chatInput" class="chat-textarea" placeholder="Type command... ya Roman Urdu mein bolain 🎙️" rows="1"></textarea>
+          <button id="micBtn" class="mic-btn" title="Voice input">🎙️</button>
+          <div class="voice-indicator" id="voiceIndicator">
+            <span class="voice-pulse"></span>
+            <span>Recording...</span>
+          </div>
           <button id="sendBtn" class="send-btn">Send ↵</button>
         </div>
       </div>
@@ -136,35 +96,75 @@
     </div>
   </div>
 
-  <!-- Edit Modal -->
-  <div class="modal-overlay" id="modalOverlay">
+  <!-- Customer Detail Modal -->
+  <div class="modal-overlay" id="customerDetailOverlay">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <div>
+          <h3 id="detailCustomerName">Customer Name</h3>
+          <p class="modal-subtitle" id="detailCustomerMeta"></p>
+        </div>
+        <div class="modal-header-actions">
+          <button class="btn-generate-report" id="generateReportBtn">📊 Monthly Report</button>
+          <button class="modal-close" id="customerDetailClose">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="customerDetailBody">
+        <!-- Daily records table rendered here -->
+      </div>
+      <div class="modal-footer">
+        <div class="overall-total" id="overallTotalBadge"></div>
+        <button class="btn-cancel" id="closeDetailBtn">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Customer Modal -->
+  <div class="modal-overlay" id="addCustomerOverlay">
     <div class="modal">
       <div class="modal-header">
-        <h3>Edit Record</h3>
-        <button class="modal-close" id="modalClose">✕</button>
+        <h3>➕ Add New Customer</h3>
+        <button class="modal-close" id="addCustomerClose">✕</button>
       </div>
       <div class="modal-body">
-        <input type="hidden" id="editId" />
         <div class="form-group">
-          <label class="form-label">Full Name</label>
-          <input type="text" id="editName" class="form-input" />
+          <label class="form-label">Full Name *</label>
+          <input type="text" id="newCustomerName" class="form-input" placeholder="e.g. Ahmed Khan" />
         </div>
         <div class="form-group">
           <label class="form-label">Phone</label>
-          <input type="text" id="editPhone" class="form-input" />
+          <input type="text" id="newCustomerPhone" class="form-input" placeholder="e.g. 0321-1234567" />
         </div>
         <div class="form-group">
-          <label class="form-label">Email</label>
-          <input type="email" id="editEmail" class="form-input" />
+          <label class="form-label">Address / Notes (Extra Info)</label>
+          <input type="text" id="newCustomerExtra" class="form-input" placeholder="e.g. Nowshera, KPK" />
         </div>
-        <div class="form-group">
-          <label class="form-label">Address</label>
-          <input type="text" id="editAddress" class="form-input" />
-        </div>
+        <div id="addCustomerResult" class="form-result"></div>
       </div>
       <div class="modal-footer">
-        <button class="btn-cancel" id="cancelEdit">Cancel</button>
-        <button class="btn-save" id="saveEdit">Save Changes</button>
+        <button class="btn-cancel" id="cancelAddCustomer">Cancel</button>
+        <button class="btn-save" id="saveNewCustomer">✦ Add Customer</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Monthly Report Modal -->
+  <div class="modal-overlay" id="reportOverlay">
+    <div class="modal modal-large">
+      <div class="modal-header">
+        <div>
+          <h3>📊 Monthly Report</h3>
+          <p class="modal-subtitle" id="reportSubtitle"></p>
+        </div>
+        <div class="modal-header-actions">
+          <button class="btn-download" id="downloadReportBtn">⬇ Download TXT</button>
+          <button class="modal-close" id="reportClose">✕</button>
+        </div>
+      </div>
+      <div class="modal-body" id="reportBody"></div>
+      <div class="modal-footer">
+        <div class="report-total" id="reportTotalBadge"></div>
+        <button class="btn-cancel" id="closeReportBtn">Close</button>
       </div>
     </div>
   </div>

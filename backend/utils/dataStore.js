@@ -1,96 +1,158 @@
 const fs = require('fs-extra');
 const path = require('path');
+const { v4: uuidv4 } = require('uuid');
 
-const DATA_FILE = path.join(__dirname, '../../data/contacts.json');
+const DATA_FILE = path.join(__dirname, '../../data/customers.json');
 
-// Migrate old UUID-based IDs to sequential numbers
-async function migrateIfNeeded(data) {
-  const needsMigration = data.some(r => typeof r.id === 'string' && r.id.includes('-'));
-  if (!needsMigration) return data;
-  console.log('Migrating old UUID IDs to sequential numbers...');
-  const migrated = data.map((r, i) => ({ ...r, id: i + 1 }));
-  await fs.writeJson(DATA_FILE, migrated, { spaces: 2 });
-  console.log('Migration complete.');
-  return migrated;
-}
-
-// Ensure data file exists with sample data
 async function ensureDataFile() {
   await fs.ensureDir(path.dirname(DATA_FILE));
   if (!await fs.pathExists(DATA_FILE)) {
-    const sampleData = [
-      { id: 1, name: 'Sagheer', phone: '111111111', email: 'sagheer@gmail.com', address: 'Nowshera KPK', createdAt: new Date().toISOString() },
-      { id: 2, name: 'Ali Khan', phone: '222222222', email: 'ali@gmail.com', address: 'Peshawar KPK', createdAt: new Date().toISOString() },
-      { id: 3, name: 'Sara Ahmed', phone: '333333333', email: 'sara@gmail.com', address: 'Lahore Punjab', createdAt: new Date().toISOString() },
-    ];
-    await fs.writeJson(DATA_FILE, sampleData, { spaces: 2 });
+    await fs.writeJson(DATA_FILE, [], { spaces: 2 });
   }
 }
 
-// Get next available sequential ID
-async function getNextId() {
-  const data = await readAll();
-  if (data.length === 0) return 1;
-  return Math.max(...data.map(r => Number(r.id) || 0)) + 1;
-}
-
-async function readAll() {
+async function loadData() {
   await ensureDataFile();
-  const raw = await fs.readJson(DATA_FILE);
-  return await migrateIfNeeded(raw);
+  return await fs.readJson(DATA_FILE);
 }
 
-async function writeAll(data) {
+async function saveData(data) {
   await fs.writeJson(DATA_FILE, data, { spaces: 2 });
 }
 
-async function createRecord(fields) {
-  const data = await readAll();
-  const newRecord = {
-    id: await getNextId(),
-    name: fields.name || '',
-    phone: fields.phone || '',
-    email: fields.email || '',
-    address: fields.address || '',
-    createdAt: new Date().toISOString()
-  };
-  data.push(newRecord);
-  await writeAll(data);
-  return newRecord;
-}
-
-async function findRecords(query) {
-  const data = await readAll();
-  if (!query || Object.keys(query).length === 0) return data;
-
-  return data.filter(record => {
-    return Object.entries(query).every(([key, value]) => {
-      if (value === undefined || value === null || value === '') return true;
-      if (!record[key] && record[key] !== 0) return false;
-      // Numeric ID: exact match
-      if (key === 'id') return String(record[key]) === String(value);
-      return record[key].toString().toLowerCase().includes(value.toString().toLowerCase());
-    });
+async function getAllCustomers() {
+  const data = await loadData();
+  return data.map(c => {
+    const overallTotal = (c.dailyRecords || []).reduce((sum, d) => sum + (d.dayTotal || 0), 0);
+    const lastRecord = (c.dailyRecords || []).slice().sort((a, b) => b.date.localeCompare(a.date))[0];
+    return {
+      id: c.id,
+      name: c.name,
+      phone: c.phone,
+      extraInfo: c.extraInfo || '',
+      createdAt: c.createdAt,
+      overallTotal,
+      lastActivity: lastRecord ? lastRecord.date : null
+    };
   });
 }
 
-async function updateRecord(id, fields) {
-  const data = await readAll();
-  const idx = data.findIndex(r => String(r.id) === String(id));
+async function getCustomerById(id) {
+  const data = await loadData();
+  const customer = data.find(c => c.id === id);
+  if (!customer) return null;
+  const overallTotal = (customer.dailyRecords || []).reduce((sum, d) => sum + (d.dayTotal || 0), 0);
+  return { ...customer, overallTotal };
+}
+
+async function createCustomer(fields) {
+  const data = await loadData();
+  const customer = {
+    id: uuidv4(),
+    name: fields.name || '',
+    phone: fields.phone || '',
+    extraInfo: fields.extraInfo || '',
+    createdAt: new Date().toISOString(),
+    dailyRecords: []
+  };
+  data.push(customer);
+  await saveData(data);
+  return customer;
+}
+
+async function updateCustomer(id, updates) {
+  const data = await loadData();
+  const idx = data.findIndex(c => c.id === id);
   if (idx === -1) return null;
-  data[idx] = { ...data[idx], ...fields, id: data[idx].id, updatedAt: new Date().toISOString() };
-  await writeAll(data);
+  const allowed = ['name', 'phone', 'extraInfo'];
+  allowed.forEach(field => {
+    if (updates[field] !== undefined) data[idx][field] = updates[field];
+  });
+  data[idx].updatedAt = new Date().toISOString();
+  await saveData(data);
   return data[idx];
 }
 
-async function deleteRecord(id) {
-  const data = await readAll();
-  const idx = data.findIndex(r => String(r.id) === String(id));
+async function deleteCustomer(id) {
+  const data = await loadData();
+  const idx = data.findIndex(c => c.id === id);
   if (idx === -1) return null;
   const deleted = data[idx];
   data.splice(idx, 1);
-  await writeAll(data);
+  await saveData(data);
   return deleted;
 }
 
-module.exports = { readAll, createRecord, findRecords, updateRecord, deleteRecord };
+async function addOrUpdateDailyRecord(customerId, date, items, note) {
+  const data = await loadData();
+  const idx = data.findIndex(c => c.id === customerId);
+  if (idx === -1) return null;
+
+  const customer = data[idx];
+  if (!customer.dailyRecords) customer.dailyRecords = [];
+
+  const dayTotal = (items || []).reduce((sum, item) => sum + ((item.qty || 0) * (item.price || 0)), 0);
+
+  const existingDayIdx = customer.dailyRecords.findIndex(d => d.date === date);
+  if (existingDayIdx >= 0) {
+    const existing = customer.dailyRecords[existingDayIdx];
+    existing.items = [...(existing.items || []), ...(items || [])];
+    existing.dayTotal = existing.items.reduce((sum, item) => sum + ((item.qty || 0) * (item.price || 0)), 0);
+    if (note !== undefined) existing.note = note;
+  } else {
+    customer.dailyRecords.push({ date, items: items || [], dayTotal, note: note || '' });
+  }
+
+  customer.dailyRecords.sort((a, b) => a.date.localeCompare(b.date));
+  await saveData(data);
+
+  const overallTotal = customer.dailyRecords.reduce((sum, d) => sum + (d.dayTotal || 0), 0);
+  return { ...customer, overallTotal };
+}
+
+async function getMonthlyReport(customerId, yearMonth) {
+  const customer = await getCustomerById(customerId);
+  if (!customer) return null;
+
+  const filtered = (customer.dailyRecords || []).filter(d =>
+    d.date && d.date.startsWith(yearMonth)
+  );
+
+  const monthTotal = filtered.reduce((sum, d) => sum + (d.dayTotal || 0), 0);
+
+  return {
+    customer: {
+      id: customer.id,
+      name: customer.name,
+      phone: customer.phone,
+      extraInfo: customer.extraInfo
+    },
+    month: yearMonth,
+    dailyRecords: filtered,
+    monthTotal
+  };
+}
+
+async function searchCustomers(query) {
+  const data = await loadData();
+  if (!query) return data;
+  const q = query.toLowerCase();
+  return data.filter(c =>
+    (c.name && c.name.toLowerCase().includes(q)) ||
+    (c.phone && c.phone.toLowerCase().includes(q)) ||
+    (c.extraInfo && c.extraInfo.toLowerCase().includes(q))
+  );
+}
+
+module.exports = {
+  loadData,
+  saveData,
+  getAllCustomers,
+  getCustomerById,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  addOrUpdateDailyRecord,
+  getMonthlyReport,
+  searchCustomers
+};

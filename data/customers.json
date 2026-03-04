@@ -1,0 +1,61 @@
+[
+  {
+    "id": "a549ebc2-01ad-4d03-81be-30e127bca44b",
+    "name": "Ahmed Khan",
+    "phone": "0321-1234567",
+    "extraInfo": "Lahore, Punjab",
+    "createdAt": "2026-03-04T18:42:23.880Z",
+    "dailyRecords": [
+      {
+        "date": "2026-03-01",
+        "items": [
+          {
+            "description": "Atta 10kg",
+            "qty": 2,
+            "price": 1200
+          },
+          {
+            "description": "Chawal 5kg",
+            "qty": 1,
+            "price": 800
+          }
+        ],
+        "dayTotal": 3200,
+        "note": "March start"
+      },
+      {
+        "date": "2026-03-04",
+        "items": [
+          {
+            "description": "Sugar 1kg",
+            "qty": 5,
+            "price": 150
+          }
+        ],
+        "dayTotal": 750,
+        "note": ""
+      }
+    ]
+  },
+  {
+    "id": "9762a69a-5c27-41af-a2b7-bf098a5472a7",
+    "name": "Sara Bibi",
+    "phone": "0300-9876543",
+    "extraInfo": "Peshawar, KPK",
+    "createdAt": "2026-03-04T18:42:23.899Z",
+    "dailyRecords": [
+      {
+        "date": "2026-03-02",
+        "items": [
+          {
+            "description": "Ghee 1kg",
+            "qty": 3,
+            "price": 2200
+          }
+        ],
+        "dayTotal": 6600,
+        "note": ""
+      }
+    ]
+  }
+]

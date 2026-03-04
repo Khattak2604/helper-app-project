@@ -1,20 +1,37 @@
 /* ===== CONFIG ===== */
 const API = 'http://localhost:5000/api';
 let chatHistory = [];
-let allRecords = [];
+let allCustomers = [];
+let currentDetailCustomerId = null;
+let currentReportCustomerId = null;
+let voiceLang = 'en-US';
+let recognition = null;
+let isRecording = false;
 
 /* ===== UTILS ===== */
 function $(id) { return document.getElementById(id); }
-function escHtml(str) { return String(str || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+function escHtml(s) {
+  return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
 function markdownBold(text) { return text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); }
+function formatCurrency(n) { return 'PKR ' + Number(n || 0).toLocaleString(); }
+function formatDate(d) {
+  if (!d) return '—';
+  try { return new Date(d).toLocaleDateString('en-PK', { year: 'numeric', month: 'short', day: 'numeric' }); }
+  catch { return d; }
+}
+function todayStr() { return new Date().toISOString().slice(0, 10); }
+function currentMonthStr() { return new Date().toISOString().slice(0, 7); }
 
 /* ===== STATUS CHECK ===== */
 async function checkStatus() {
   try {
-    const res = await fetch(`${API}/data`);
+    const res = await fetch(`${API}/customers`);
     if (res.ok) {
       $('statusDot').className = 'status-dot online';
       $('statusText').textContent = 'Online';
+    } else {
+      throw new Error('Not OK');
     }
   } catch {
     $('statusDot').className = 'status-dot error';
@@ -22,48 +39,185 @@ async function checkStatus() {
   }
 }
 
-/* ===== DATA TABLE ===== */
-async function loadTable(params = {}) {
-  const container = $('tableContainer');
-  container.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>';
+/* ===== CUSTOMER DASHBOARD ===== */
+async function loadCustomers(search = '') {
+  const list = $('customerList');
+  list.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>';
   try {
-    const qs = new URLSearchParams(params).toString();
-    const res = await fetch(`${API}/data${qs ? '?' + qs : ''}`);
+    const qs = search ? `?search=${encodeURIComponent(search)}` : '';
+    const res = await fetch(`${API}/customers${qs}`);
     const json = await res.json();
     if (!json.success) throw new Error(json.message);
-    allRecords = json.data;
-    $('recordCount').textContent = `${json.count} record${json.count !== 1 ? 's' : ''}`;
-    renderTable(allRecords);
+    allCustomers = json.data;
+    $('customerCount').textContent = `${json.count} customer${json.count !== 1 ? 's' : ''}`;
+    renderCustomerList(allCustomers);
   } catch (err) {
-    container.innerHTML = `<div class="empty-state"><p>⚠ ${err.message}</p></div>`;
+    list.innerHTML = `<div class="empty-state"><p>⚠ ${escHtml(err.message)}</p></div>`;
   }
 }
 
-function renderTable(records) {
-  const container = $('tableContainer');
-  if (!records.length) {
-    container.innerHTML = '<div class="empty-state"><p>No records found</p></div>';
+function renderCustomerList(customers) {
+  const list = $('customerList');
+  if (!customers.length) {
+    list.innerHTML = '<div class="empty-state"><p>No customers yet. Add one or use the chatbot!</p></div>';
     return;
   }
-  container.innerHTML = `
-    <table class="data-table">
+  list.innerHTML = customers.map(c => `
+    <div class="customer-card" onclick="openCustomerDetail('${escHtml(c.id)}')" data-id="${escHtml(c.id)}">
+      <div class="customer-card-left">
+        <div class="customer-card-name">${escHtml(c.name)}</div>
+        <div class="customer-card-meta">📞 ${escHtml(c.phone || '—')} ${c.extraInfo ? '· ' + escHtml(c.extraInfo) : ''}</div>
+      </div>
+      <div class="customer-card-right">
+        <div class="customer-card-total">${formatCurrency(c.overallTotal)}</div>
+        <div class="customer-card-last">${c.lastActivity ? 'Last: ' + c.lastActivity : 'No records'}</div>
+      </div>
+      <div class="customer-card-actions" onclick="event.stopPropagation()">
+        <button class="btn-card-action btn-card-edit" onclick="openEditCustomerModal('${escHtml(c.id)}')">Edit</button>
+        <button class="btn-card-action btn-card-delete" onclick="deleteCustomer('${escHtml(c.id)}', '${escHtml(c.name)}')">Del</button>
+      </div>
+    </div>
+  `).join('');
+}
+
+/* ===== GLOBAL SEARCH ===== */
+$('globalSearch').addEventListener('input', (e) => {
+  const q = e.target.value.trim();
+  if (!q) { renderCustomerList(allCustomers); return; }
+  const lower = q.toLowerCase();
+  renderCustomerList(allCustomers.filter(c =>
+    (c.name && c.name.toLowerCase().includes(lower)) ||
+    (c.phone && c.phone.toLowerCase().includes(lower)) ||
+    (c.extraInfo && c.extraInfo.toLowerCase().includes(lower))
+  ));
+});
+
+$('refreshBtn').addEventListener('click', () => loadCustomers());
+
+/* ===== ADD CUSTOMER MODAL ===== */
+$('addCustomerBtn').addEventListener('click', () => {
+  $('newCustomerName').value = '';
+  $('newCustomerPhone').value = '';
+  $('newCustomerExtra').value = '';
+  $('addCustomerResult').className = 'form-result';
+  $('addCustomerOverlay').classList.add('open');
+  $('newCustomerName').focus();
+});
+
+function closeAddCustomer() { $('addCustomerOverlay').classList.remove('open'); }
+$('addCustomerClose').addEventListener('click', closeAddCustomer);
+$('cancelAddCustomer').addEventListener('click', closeAddCustomer);
+$('addCustomerOverlay').addEventListener('click', e => { if (e.target === $('addCustomerOverlay')) closeAddCustomer(); });
+
+$('saveNewCustomer').addEventListener('click', async () => {
+  const name = $('newCustomerName').value.trim();
+  const resultEl = $('addCustomerResult');
+  resultEl.className = 'form-result';
+  if (!name) {
+    resultEl.textContent = 'Please enter a customer name.';
+    resultEl.className = 'form-result error';
+    return;
+  }
+  const btn = $('saveNewCustomer');
+  btn.disabled = true; btn.textContent = 'Adding...';
+  try {
+    const res = await fetch(`${API}/customers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, phone: $('newCustomerPhone').value.trim(), extraInfo: $('newCustomerExtra').value.trim() })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message);
+    resultEl.textContent = `✅ ${json.message}`;
+    resultEl.className = 'form-result success';
+    loadCustomers();
+    setTimeout(() => closeAddCustomer(), 1200);
+  } catch (err) {
+    resultEl.textContent = `❌ ${err.message}`;
+    resultEl.className = 'form-result error';
+  } finally {
+    btn.disabled = false; btn.textContent = '✦ Add Customer';
+  }
+});
+
+/* ===== EDIT CUSTOMER (inline update via confirm) ===== */
+async function openEditCustomerModal(id) {
+  const customer = allCustomers.find(c => c.id === id);
+  if (!customer) return;
+  const name = prompt('Edit name:', customer.name);
+  if (name === null) return;
+  const phone = prompt('Edit phone:', customer.phone || '');
+  if (phone === null) return;
+  const extraInfo = prompt('Edit address/notes:', customer.extraInfo || '');
+  if (extraInfo === null) return;
+  try {
+    const res = await fetch(`${API}/customers/${id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name.trim(), phone: phone.trim(), extraInfo: extraInfo.trim() })
+    });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message);
+    loadCustomers();
+  } catch (err) { alert('Update failed: ' + err.message); }
+}
+
+/* ===== DELETE CUSTOMER ===== */
+async function deleteCustomer(id, name) {
+  if (!confirm(`Delete customer "${name}" and all their records?`)) return;
+  try {
+    const res = await fetch(`${API}/customers/${id}`, { method: 'DELETE' });
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message);
+    loadCustomers();
+  } catch (err) { alert('Delete failed: ' + err.message); }
+}
+
+/* ===== CUSTOMER DETAIL MODAL ===== */
+async function openCustomerDetail(id) {
+  currentDetailCustomerId = id;
+  $('customerDetailOverlay').classList.add('open');
+  $('customerDetailBody').innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>';
+  $('overallTotalBadge').textContent = '';
+  try {
+    const res = await fetch(`${API}/customers/${id}`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message);
+    const c = json.data;
+    $('detailCustomerName').textContent = c.name;
+    $('detailCustomerMeta').textContent = `📞 ${c.phone || '—'} · ${c.extraInfo || 'No notes'} · Joined: ${formatDate(c.createdAt)}`;
+    $('overallTotalBadge').textContent = `Total: ${formatCurrency(c.overallTotal)}`;
+    renderDailyRecords(c.dailyRecords || []);
+  } catch (err) {
+    $('customerDetailBody').innerHTML = `<div class="empty-state"><p>⚠ ${escHtml(err.message)}</p></div>`;
+  }
+}
+
+function renderDailyRecords(dailyRecords) {
+  const body = $('customerDetailBody');
+  if (!dailyRecords.length) {
+    body.innerHTML = '<div class="empty-state"><p>No daily records yet. Use the chatbot to add items!</p></div>';
+    return;
+  }
+  const sorted = [...dailyRecords].sort((a, b) => b.date.localeCompare(a.date));
+  body.innerHTML = `
+    <table class="daily-records-table">
       <thead>
-        <tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th><th>Actions</th></tr>
+        <tr><th>Date</th><th>Items</th><th>Day Total</th><th>Note</th></tr>
       </thead>
       <tbody>
-        ${records.map(r => `
+        ${sorted.map(d => `
           <tr>
-            <td><span class="id-chip">${r.id}</span></td>
-            <td>${escHtml(r.name)}</td>
-            <td>${escHtml(r.phone)}</td>
-            <td>${escHtml(r.email)}</td>
-            <td>${escHtml(r.address)}</td>
+            <td class="date-cell">${escHtml(d.date)}</td>
             <td>
-              <div class="table-actions">
-                <button class="btn-edit" onclick="openEdit(${r.id})">Edit</button>
-                <button class="btn-delete" onclick="confirmDelete(${r.id}, '${escHtml(r.name)}')">Del</button>
-              </div>
+              <ul class="items-list">
+                ${(d.items || []).map(item => `
+                  <li>${escHtml(item.description)} <span>× ${item.qty} @ PKR ${Number(item.price).toLocaleString()} = PKR ${(item.qty * item.price).toLocaleString()}</span></li>
+                `).join('')}
+              </ul>
             </td>
+            <td class="day-total-cell">${formatCurrency(d.dayTotal)}</td>
+            <td class="note-cell">${escHtml(d.note || '')}</td>
           </tr>
         `).join('')}
       </tbody>
@@ -71,129 +225,218 @@ function renderTable(records) {
   `;
 }
 
-/* ===== SEARCH & FILTER ===== */
-$('globalSearch').addEventListener('input', (e) => {
-  const q = e.target.value.toLowerCase().trim();
-  if (!q) { renderTable(allRecords); return; }
-  renderTable(allRecords.filter(r =>
-    Object.values(r).some(v => v && v.toString().toLowerCase().includes(q))
-  ));
+function closeCustomerDetail() { $('customerDetailOverlay').classList.remove('open'); }
+$('customerDetailClose').addEventListener('click', closeCustomerDetail);
+$('closeDetailBtn').addEventListener('click', closeCustomerDetail);
+$('customerDetailOverlay').addEventListener('click', e => { if (e.target === $('customerDetailOverlay')) closeCustomerDetail(); });
+
+$('generateReportBtn').addEventListener('click', () => {
+  if (!currentDetailCustomerId) return;
+  closeCustomerDetail();
+  openReportModal(currentDetailCustomerId);
 });
 
-$('applyFilter').addEventListener('click', () => {
-  const field = $('filterField').value;
-  const value = $('filterValue').value.trim();
-  if (!value) return;
-  loadTable(field ? { [field]: value } : { search: value });
-});
+/* ===== MONTHLY REPORT MODAL ===== */
+async function openReportModal(customerId, month) {
+  currentReportCustomerId = customerId;
+  $('reportOverlay').classList.add('open');
+  $('reportBody').innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>';
+  $('reportTotalBadge').textContent = '';
 
-$('clearFilter').addEventListener('click', () => {
-  $('filterField').value = '';
-  $('filterValue').value = '';
-  loadTable();
-});
+  // Find customer name
+  const customer = allCustomers.find(c => c.id === customerId);
+  const m = month || currentMonthStr();
 
-$('filterValue').addEventListener('keypress', e => { if (e.key === 'Enter') $('applyFilter').click(); });
-$('refreshBtn').addEventListener('click', loadTable);
-
-/* ===== COLLAPSIBLE ADD FORM ===== */
-let addFormOpen = true;
-$('addSectionToggle').addEventListener('click', () => {
-  addFormOpen = !addFormOpen;
-  $('addFormBody').classList.toggle('collapsed', !addFormOpen);
-  $('collapseArrow').classList.toggle('up', addFormOpen);
-});
-
-/* ===== EDIT MODAL ===== */
-function openEdit(id) {
-  const record = allRecords.find(r => String(r.id) === String(id));
-  if (!record) return;
-  $('editId').value = record.id;
-  $('editName').value = record.name || '';
-  $('editPhone').value = record.phone || '';
-  $('editEmail').value = record.email || '';
-  $('editAddress').value = record.address || '';
-  $('modalOverlay').classList.add('open');
-}
-
-function closeModal() { $('modalOverlay').classList.remove('open'); }
-$('modalClose').addEventListener('click', closeModal);
-$('cancelEdit').addEventListener('click', closeModal);
-$('modalOverlay').addEventListener('click', e => { if (e.target === $('modalOverlay')) closeModal(); });
-
-$('saveEdit').addEventListener('click', async () => {
-  const id = $('editId').value;
-  const btn = $('saveEdit');
-  btn.disabled = true; btn.textContent = 'Saving...';
-  try {
-    const res = await fetch(`${API}/data/${id}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        name: $('editName').value, phone: $('editPhone').value,
-        email: $('editEmail').value, address: $('editAddress').value
-      })
-    });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message);
-    closeModal();
-    loadTable();
-  } catch (err) {
-    alert('Update failed: ' + err.message);
-  } finally {
-    btn.disabled = false; btn.textContent = 'Save Changes';
-  }
-});
-
-/* ===== DELETE ===== */
-async function confirmDelete(id, name) {
-  if (!confirm(`Delete record for "${name}"?`)) return;
-  try {
-    const res = await fetch(`${API}/data/${id}`, { method: 'DELETE' });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message);
-    loadTable();
-  } catch (err) { alert('Delete failed: ' + err.message); }
-}
-
-/* ===== ADD RECORD ===== */
-$('submitAdd').addEventListener('click', async () => {
-  const name = $('addName').value.trim();
-  const resultEl = $('addResult');
-  resultEl.className = 'form-result';
-  if (!name) { resultEl.textContent = 'Please enter a name.'; resultEl.className = 'form-result error'; return; }
-  const btn = $('submitAdd');
-  btn.disabled = true; btn.textContent = 'Adding...';
-  try {
-    const res = await fetch(`${API}/data`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name, phone: $('addPhone').value.trim(), email: $('addEmail').value.trim(), address: $('addAddress').value.trim() })
-    });
-    const json = await res.json();
-    if (!json.success) throw new Error(json.message);
-    resultEl.textContent = `✅ ${json.message}`;
-    resultEl.className = 'form-result success';
-    $('addName').value = ''; $('addPhone').value = ''; $('addEmail').value = ''; $('addAddress').value = '';
-    loadTable();
-    setTimeout(() => { resultEl.className = 'form-result'; }, 3000);
-  } catch (err) {
-    resultEl.textContent = `❌ ${err.message}`;
-    resultEl.className = 'form-result error';
-  } finally {
-    btn.disabled = false; btn.textContent = '✦ Add Record';
-  }
-});
-
-/* ===== CLEAR CHAT ===== */
-$('clearChatBtn').addEventListener('click', () => {
-  chatHistory = [];
-  $('chatMessages').innerHTML = `
-    <div class="chat-msg bot">
-      <div class="msg-avatar">◈</div>
-      <div class="msg-bubble"><p>Chat cleared. How can I help you?</p></div>
+  $('reportSubtitle').textContent = `${customer ? customer.name : ''} — ${m}`;
+  $('reportBody').innerHTML = `
+    <div class="report-month-row">
+      <label>Month:</label>
+      <input type="month" class="month-input" id="reportMonthInput" value="${escHtml(m)}" />
+      <button class="btn-fetch-report" id="fetchReportBtn">Load Report</button>
     </div>
+    <div id="reportContent"><div class="loading-state"><div class="spinner"></div><p>Loading...</p></div></div>
   `;
+
+  $('fetchReportBtn').addEventListener('click', () => {
+    const selectedMonth = $('reportMonthInput').value;
+    if (selectedMonth) fetchAndRenderReport(customerId, selectedMonth);
+  });
+
+  fetchAndRenderReport(customerId, m);
+}
+
+async function fetchAndRenderReport(customerId, month) {
+  const contentEl = $('reportContent');
+  if (!contentEl) return;
+  contentEl.innerHTML = '<div class="loading-state"><div class="spinner"></div><p>Loading...</p></div>';
+  $('reportTotalBadge').textContent = '';
+
+  // Update subtitle
+  const customer = allCustomers.find(c => c.id === customerId);
+  $('reportSubtitle').textContent = `${customer ? customer.name : ''} — ${month}`;
+
+  try {
+    const res = await fetch(`${API}/customers/${customerId}/report?month=${encodeURIComponent(month)}`);
+    const json = await res.json();
+    if (!json.success) throw new Error(json.message);
+    const report = json.data;
+
+    $('reportTotalBadge').textContent = `Month Total: ${formatCurrency(report.monthTotal)}`;
+
+    if (!report.dailyRecords.length) {
+      contentEl.innerHTML = `<div class="empty-state"><p>No records for ${month}.</p></div>`;
+      return;
+    }
+
+    const sorted = [...report.dailyRecords].sort((a, b) => a.date.localeCompare(b.date));
+    contentEl.innerHTML = `
+      <div class="report-header-section">
+        <h4>🏪 ${escHtml(report.customer.name)}</h4>
+        <p>📞 ${escHtml(report.customer.phone || '—')} · ${escHtml(report.customer.extraInfo || '')}</p>
+      </div>
+      ${sorted.map(d => `
+        <div class="report-day-block">
+          <div class="report-day-header">
+            <span class="report-day-date">📅 ${escHtml(d.date)}</span>
+            <span class="report-day-total-badge">${formatCurrency(d.dayTotal)}</span>
+          </div>
+          <table class="report-items-table">
+            <thead><tr><th>Item</th><th>Qty</th><th>Price</th><th>Amount</th></tr></thead>
+            <tbody>
+              ${(d.items || []).map(item => `
+                <tr>
+                  <td>${escHtml(item.description)}</td>
+                  <td>${item.qty}</td>
+                  <td>PKR ${Number(item.price).toLocaleString()}</td>
+                  <td>PKR ${(item.qty * item.price).toLocaleString()}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+          ${d.note ? `<div style="padding:0.35rem 0.75rem;font-size:0.75rem;color:var(--text3);font-style:italic">📝 ${escHtml(d.note)}</div>` : ''}
+        </div>
+      `).join('')}
+    `;
+
+    // Store for download
+    $('downloadReportBtn').onclick = () => downloadReportAsTxt(report, month);
+
+  } catch (err) {
+    contentEl.innerHTML = `<div class="empty-state"><p>⚠ ${escHtml(err.message)}</p></div>`;
+  }
+}
+
+function downloadReportAsTxt(report, month) {
+  const lines = [];
+  lines.push('='.repeat(50));
+  lines.push(`DUKAN LEDGER — MONTHLY REPORT`);
+  lines.push('='.repeat(50));
+  lines.push(`Customer: ${report.customer.name}`);
+  lines.push(`Phone: ${report.customer.phone || '—'}`);
+  lines.push(`Address/Notes: ${report.customer.extraInfo || '—'}`);
+  lines.push(`Month: ${month}`);
+  lines.push('='.repeat(50));
+  lines.push('');
+
+  const sorted = [...report.dailyRecords].sort((a, b) => a.date.localeCompare(b.date));
+  sorted.forEach(d => {
+    lines.push(`Date: ${d.date}`);
+    lines.push('-'.repeat(30));
+    (d.items || []).forEach(item => {
+      const amount = item.qty * item.price;
+      lines.push(`  ${item.description.padEnd(20)} x${item.qty}  @PKR ${item.price}  = PKR ${amount}`);
+    });
+    lines.push(`  ${'Day Total:'.padEnd(30)} PKR ${d.dayTotal}`);
+    if (d.note) lines.push(`  Note: ${d.note}`);
+    lines.push('');
+  });
+
+  lines.push('='.repeat(50));
+  lines.push(`MONTH TOTAL: PKR ${report.monthTotal}`);
+  lines.push('='.repeat(50));
+  lines.push(`Generated: ${new Date().toLocaleString()}`);
+
+  const txt = lines.join('\n');
+  const blob = new Blob([txt], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `report_${report.customer.name.replace(/\s+/g,'_')}_${month}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function closeReportModal() { $('reportOverlay').classList.remove('open'); }
+$('reportClose').addEventListener('click', closeReportModal);
+$('closeReportBtn').addEventListener('click', closeReportModal);
+$('reportOverlay').addEventListener('click', e => { if (e.target === $('reportOverlay')) closeReportModal(); });
+
+/* ===== VOICE INPUT ===== */
+function initSpeechRecognition() {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!SpeechRecognition) {
+    $('micBtn').title = 'Voice input not supported in this browser';
+    $('micBtn').style.opacity = '0.4';
+    $('micBtn').disabled = true;
+    return;
+  }
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = voiceLang;
+
+  recognition.onstart = () => {
+    isRecording = true;
+    $('micBtn').classList.add('recording');
+    $('voiceIndicator').classList.add('active');
+  };
+  recognition.onend = () => {
+    isRecording = false;
+    $('micBtn').classList.remove('recording');
+    $('voiceIndicator').classList.remove('active');
+  };
+  recognition.onresult = (e) => {
+    let transcript = '';
+    for (let i = e.resultIndex; i < e.results.length; i++) {
+      transcript += e.results[i][0].transcript;
+    }
+    $('chatInput').value = transcript;
+    $('chatInput').style.height = 'auto';
+    $('chatInput').style.height = Math.min($('chatInput').scrollHeight, 100) + 'px';
+  };
+  recognition.onerror = (e) => {
+    console.warn('Speech recognition error:', e.error);
+    isRecording = false;
+    $('micBtn').classList.remove('recording');
+    $('voiceIndicator').classList.remove('active');
+  };
+}
+
+$('micBtn').addEventListener('click', () => {
+  if (!recognition) { alert('Voice input is not supported in this browser.'); return; }
+  if (isRecording) {
+    recognition.stop();
+  } else {
+    recognition.lang = voiceLang;
+    try { recognition.start(); } catch (e) { console.warn(e); }
+  }
+});
+
+/* ===== LANGUAGE TOGGLE ===== */
+$('langToggle').addEventListener('click', () => {
+  const btn = $('langToggle');
+  if (voiceLang === 'en-US') {
+    voiceLang = 'ur-PK';
+    btn.textContent = 'اردو';
+    btn.classList.add('urdu');
+  } else {
+    voiceLang = 'en-US';
+    btn.textContent = 'EN';
+    btn.classList.remove('urdu');
+  }
+  if (recognition) recognition.lang = voiceLang;
 });
 
 /* ===== CHAT ===== */
@@ -217,7 +460,7 @@ function addChatMsg(role, html) {
   const div = document.createElement('div');
   div.className = `chat-msg ${role}`;
   div.innerHTML = `
-    <div class="msg-avatar">${role === 'bot' ? '◈' : '✦'}</div>
+    <div class="msg-avatar">${role === 'bot' ? '🤖' : '👤'}</div>
     <div class="msg-bubble">${html}</div>
   `;
   msgs.appendChild(div);
@@ -225,52 +468,119 @@ function addChatMsg(role, html) {
   return div;
 }
 
-function buildMiniTable(records) {
-  if (!records || !records.length) return '';
-  return `
-    <table class="mini-table">
-      <thead><tr><th>ID</th><th>Name</th><th>Phone</th><th>Email</th><th>Address</th></tr></thead>
-      <tbody>
-        ${records.map(r => `
-          <tr>
-            <td>${r.id}</td>
-            <td>${escHtml(r.name)}</td>
-            <td>${escHtml(r.phone)}</td>
-            <td>${escHtml(r.email)}</td>
-            <td>${escHtml(r.address)}</td>
-          </tr>
-        `).join('')}
-      </tbody>
-    </table>
+$('clearChatBtn').addEventListener('click', () => {
+  chatHistory = [];
+  $('chatMessages').innerHTML = `
+    <div class="chat-msg bot">
+      <div class="msg-avatar">🤖</div>
+      <div class="msg-bubble"><p>Chat cleared. Kuch poochna ho toh bolain!</p></div>
+    </div>
   `;
+});
+
+function buildChatResultHtml(intent, data, message) {
+  const msg = markdownBold(message || '');
+  let html = '';
+
+  if (!data || data.type === 'error') {
+    html += `<span class="result-badge error">✕ Error</span><p>${msg}</p>`;
+    return html;
+  }
+
+  switch (intent) {
+    case 'ADD_CUSTOMER':
+      html += `<span class="result-badge success">✓ Customer Added</span><p>${msg}</p>`;
+      if (data.customer) html += buildCustomerMiniCard(data.customer);
+      break;
+
+    case 'ADD_DAILY_RECORD':
+      html += `<span class="result-badge success">✓ Record Added</span><p>${msg}</p>`;
+      if (data.dayRecord) {
+        html += `<div style="margin-top:0.5rem;font-size:0.78rem">`;
+        html += `<strong>Date:</strong> ${escHtml(data.date)}<br>`;
+        html += `<strong>Items:</strong><ul class="items-list" style="margin-left:0.5rem">`;
+        (data.dayRecord.items || []).forEach(item => {
+          html += `<li>${escHtml(item.description)} × ${item.qty} @ PKR ${Number(item.price).toLocaleString()} = PKR ${(item.qty * item.price).toLocaleString()}</li>`;
+        });
+        html += `</ul><strong>Day Total:</strong> ${formatCurrency(data.dayRecord.dayTotal)}</div>`;
+      }
+      break;
+
+    case 'GET_CUSTOMER':
+    case 'GET_OVERALL_TOTAL':
+      html += `<span class="result-badge info">📋 Customer</span><p>${msg}</p>`;
+      if (data.customer) {
+        const c = data.customer;
+        html += `<div style="margin-top:0.5rem;font-size:0.78rem">
+          <strong>${escHtml(c.name)}</strong> · ${escHtml(c.phone || '—')}<br>
+          <span style="color:var(--text3)">${escHtml(c.extraInfo || '')}</span><br>
+          Total: <strong>${formatCurrency(c.overallTotal)}</strong>
+          <br><button class="example-btn" style="margin-top:0.4rem" onclick="openCustomerDetail('${escHtml(c.id)}')">View Full Record →</button>
+        </div>`;
+      }
+      if (data.total !== undefined) {
+        html += `<div style="margin-top:0.5rem;font-size:0.88rem;font-weight:700;color:var(--primary)">${formatCurrency(data.total)}</div>`;
+      }
+      break;
+
+    case 'GET_ALL_CUSTOMERS':
+    case 'SEARCH_CUSTOMER': {
+      const customers = data.customers || [];
+      html += `<span class="result-badge info">📋 ${customers.length} Customer(s)</span><p>${msg}</p>`;
+      if (customers.length) {
+        html += `<table class="mini-table"><thead><tr><th>Name</th><th>Phone</th><th>Total</th></tr></thead><tbody>`;
+        customers.forEach(c => {
+          html += `<tr>
+            <td><button class="example-btn" style="padding:0.1rem 0.4rem" onclick="openCustomerDetail('${escHtml(c.id)}')">${escHtml(c.name)}</button></td>
+            <td>${escHtml(c.phone || '—')}</td>
+            <td>${formatCurrency(c.overallTotal)}</td>
+          </tr>`;
+        });
+        html += `</tbody></table>`;
+      }
+      break;
+    }
+
+    case 'GET_DAILY_RECORDS': {
+      html += `<span class="result-badge info">📋 Records</span><p>${msg}</p>`;
+      const records = data.records || [];
+      if (records.length && data.customer) {
+        html += `<button class="example-btn" style="margin-bottom:0.4rem" onclick="openCustomerDetail('${escHtml(data.customer.id)}')">View Full Detail →</button>`;
+      }
+      break;
+    }
+
+    case 'GENERATE_MONTHLY_REPORT': {
+      html += `<span class="result-badge info">📊 Report</span><p>${msg}</p>`;
+      const report = data.report;
+      if (report) {
+        html += `<button class="example-btn" onclick="openReportModal('${escHtml(report.customer.id)}', '${escHtml(report.month)}')">📊 Open Full Report →</button>`;
+      }
+      break;
+    }
+
+    case 'UPDATE_CUSTOMER':
+      html += `<span class="result-badge success">✓ Updated</span><p>${msg}</p>`;
+      if (data.customer) html += buildCustomerMiniCard(data.customer);
+      break;
+
+    case 'DELETE_CUSTOMER':
+      html += `<span class="result-badge warn">🗑 Deleted</span><p>${msg}</p>`;
+      break;
+
+    default:
+      html += `<p>${msg}</p>`;
+      if (data.type === 'info') html += `<span class="result-badge info">ℹ Info</span>`;
+  }
+
+  return html;
 }
 
-function buildResultHtml(result) {
-  if (!result) return '<p>Done.</p>';
-  let html = '';
-  const msg = markdownBold(result.message || '');
-
-  if (result.type === 'error') {
-    html += `<span class="result-badge error">✕ Error</span><p>${msg}</p>`;
-  } else if (result.type === 'created') {
-    html += `<span class="result-badge success">✓ Created</span><p>${msg}</p>`;
-    if (result.record) html += buildMiniTable([result.record]);
-  } else if (result.type === 'updated') {
-    html += `<span class="result-badge success">✓ Updated</span><p>${msg}</p>`;
-    if (result.record) html += buildMiniTable([result.record]);
-  } else if (result.type === 'deleted') {
-    html += `<span class="result-badge success">🗑 Deleted</span><p>${msg}</p>`;
-  } else if (result.type === 'records') {
-    html += `<span class="result-badge success">📋 Results</span><p>${msg}</p>`;
-    if (result.records && result.records.length > 0) html += buildMiniTable(result.records);
-  } else if (result.type === 'ambiguous') {
-    html += `<span class="result-badge warn">⚠ Multiple matches</span><p>${msg}</p>`;
-    if (result.records) html += buildMiniTable(result.records);
-    if (result.updates) html += `<p style="margin-top:0.5rem;font-size:0.68rem;color:var(--text3)">Tell me the ID to update with: ${JSON.stringify(result.updates)}</p>`;
-  } else {
-    html += `<p>${msg}</p>`;
-  }
-  return html;
+function buildCustomerMiniCard(c) {
+  return `<div style="margin-top:0.5rem;font-size:0.78rem;background:var(--bg3);padding:0.5rem;border-radius:6px;border:1px solid var(--border)">
+    <strong>${escHtml(c.name)}</strong> · ${escHtml(c.phone || '—')}<br>
+    <span style="color:var(--text3)">${escHtml(c.extraInfo || '')}</span>
+  </div>`;
 }
 
 async function sendChat() {
@@ -300,18 +610,19 @@ async function sendChat() {
     }
 
     const modeTag = json.usedAI
-      ? `<span class="ai-mode-tag ai">◈ AI</span>`
-      : `<span class="ai-mode-tag fallback" title="${escHtml(json.aiError || '')}">⚡ Smart Parse</span>`;
+      ? `<span class="ai-mode-tag ai">🤖 AI</span>`
+      : `<span class="ai-mode-tag fallback" title="${escHtml(json.aiError || '')}">⚡ Fallback</span>`;
 
-    addChatMsg('bot', modeTag + buildResultHtml(json.result));
-    chatHistory.push({ role: 'assistant', content: json.result?.message || 'Done.' });
+    addChatMsg('bot', modeTag + buildChatResultHtml(json.intent, json.data, json.message));
+    chatHistory.push({ role: 'assistant', content: json.message || 'Done.' });
 
-    if (['created', 'updated', 'deleted'].includes(json.result?.type)) {
-      loadTable();
+    const refreshIntents = ['ADD_CUSTOMER', 'ADD_DAILY_RECORD', 'UPDATE_CUSTOMER', 'DELETE_CUSTOMER'];
+    if (refreshIntents.includes(json.intent)) {
+      loadCustomers();
     }
   } catch (err) {
     thinkingDiv.remove();
-    addChatMsg('bot', `<span class="result-badge error">✕ Connection Error</span><p>Could not reach the server. Make sure the backend is running.</p>`);
+    addChatMsg('bot', `<span class="result-badge error">✕ Connection Error</span><p>Server se connect nahi ho saka. Backend running hai?</p>`);
   } finally {
     sendBtn.disabled = false;
     input.focus();
@@ -319,5 +630,6 @@ async function sendChat() {
 }
 
 /* ===== INIT ===== */
+initSpeechRecognition();
 checkStatus();
-loadTable();
+loadCustomers();
