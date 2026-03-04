@@ -1,11 +1,11 @@
-# 🤖 AI Data Manager — Ollama Cloud CRUD Chatbot
+# 🏪 Dukan Ledger — Shop Record Manager
 
-A full-stack web app with an AI chatbot that performs CRUD operations on contact data using Ollama cloud models.
+A full-stack Pakistani shop ledger chatbot that manages customer accounts and daily purchase records using AI (Ollama). Supports both English and Roman Urdu commands, including voice input.
 
 ## 📁 Folder Structure
 
 ```
-ollama-crud-chatbot/
+helper-app-project/
 ├── frontend/
 │   ├── index.html
 │   ├── css/styles.css
@@ -15,14 +15,14 @@ ollama-crud-chatbot/
 │   ├── package.json
 │   ├── .env          ← YOU CREATE THIS
 │   ├── routes/
-│   │   ├── data.js   ← CRUD REST API
-│   │   └── chat.js   ← AI chat endpoint
+│   │   ├── customers.js  ← Customer CRUD + daily records + reports
+│   │   └── chat.js       ← AI chat endpoint (intent-based)
 │   ├── services/
-│   │   └── ollamaService.js
+│   │   └── ollamaService.js  ← Ollama cloud integration
 │   └── utils/
-│       └── dataStore.js
+│       └── dataStore.js  ← Local JSON file storage
 └── data/
-    └── contacts.json ← auto-created
+    └── customers.json ← auto-created on startup
 ```
 
 ## 🚀 Setup
@@ -36,7 +36,6 @@ npm install
 ### 2. Create your .env file
 ```bash
 # In backend/ folder, create a file called .env
-OLLAMA_API_URL=https://api.ollama.ai
 OLLAMA_API_KEY=your_api_key_here
 OLLAMA_MODEL=deepseek-v3.1:671b-cloud
 PORT=5000
@@ -54,30 +53,41 @@ Visit: http://localhost:5000
 
 ---
 
-## 🤖 Best Ollama Cloud Models for This Chatbot
+## 💬 Chat Commands (English & Roman Urdu)
 
-| Model | Speed | Intelligence | Recommended For |
-|-------|-------|-------------|-----------------|
-| **deepseek-v3.1:671b-cloud** ⭐ | Fast | Excellent | **Best overall — great at JSON & instructions** |
-| **qwen3-coder:480b-cloud** | Medium | Excellent | Best if you want code-heavy tasks too |
-| **glm-4.6:cloud** | Very Fast | Good | Fast responses, lightweight |
-| **gpt-oss:20b-cloud** | Fast | Good | Balanced option |
-
-### 🏆 Recommendation: `deepseek-v3.1:671b-cloud`
-This model is excellent at following structured JSON instructions, which is exactly what the chatbot needs to parse CRUD commands reliably.
+| Command | Intent |
+|---------|--------|
+| `Add customer Ali, phone 0321-1234567, Lahore` | ADD_CUSTOMER |
+| `Naya customer Sara banao, phone 0300-9876543` | ADD_CUSTOMER |
+| `Ahmed ka aaj ka hisab add karo — atta 2 bag 1200 each` | ADD_DAILY_RECORD |
+| `Ali ka record dikhao` | GET_CUSTOMER |
+| `Show Ali's record` | GET_CUSTOMER |
+| `Sab customers dikhao` | GET_ALL_CUSTOMERS |
+| `Show all customers` | GET_ALL_CUSTOMERS |
+| `Ahmed ka kul hisab kya hai` | GET_OVERALL_TOTAL |
+| `Sara ka is mahine ka report banao` | GENERATE_MONTHLY_REPORT |
+| `Generate March 2026 report for Ahmed` | GENERATE_MONTHLY_REPORT |
+| `Update Sara's phone to 0300-1234567` | UPDATE_CUSTOMER |
+| `Delete record for Ali` | DELETE_CUSTOMER |
+| `Find customer named Khan` | SEARCH_CUSTOMER |
 
 ---
 
-## 💬 Chat Commands Examples
+## 🎙️ Voice Input
 
-| Command | Action |
-|---------|--------|
-| `Add new person named Ahmed with phone 0321-1234567 address Karachi` | CREATE |
-| `Show all records` | READ all |
-| `Find records with name Ali` | SEARCH |
-| `Update phone for Sara to 0300-9876543` | UPDATE |
-| `Delete the record for Ali Khan` | DELETE |
-| `Update record ID abc123 set email to new@gmail.com` | UPDATE by ID |
+Click the 🎙️ microphone button to speak commands. The transcript appears in the input box for confirmation before sending.
+
+- Toggle between **EN** (English) and **اردو** (Urdu/Roman Urdu) using the language button
+- Uses browser's built-in Web Speech API — no external library needed
+- Graceful fallback message if browser doesn't support it
+
+---
+
+## 📊 Monthly Report
+
+- Click **📊 Monthly Report** in a customer's detail view to generate a full monthly report
+- Shows day-by-day breakdown of items, quantities, prices, and totals
+- Download as `.txt` file with the ⬇ button
 
 ---
 
@@ -85,10 +95,44 @@ This model is excellent at following structured JSON instructions, which is exac
 
 | Method | URL | Description |
 |--------|-----|-------------|
-| GET | `/api/data` | Get all records |
-| GET | `/api/data?search=ali` | Search records |
-| GET | `/api/data?name=ali` | Filter by field |
-| POST | `/api/data` | Create record |
-| PUT | `/api/data/:id` | Update by ID |
-| DELETE | `/api/data/:id` | Delete by ID |
-| POST | `/api/chat` | AI chat endpoint |
+| GET | `/api/customers` | Get all customers (summary) |
+| GET | `/api/customers/:id` | Get full customer record |
+| POST | `/api/customers` | Create customer |
+| PUT | `/api/customers/:id` | Update customer info |
+| DELETE | `/api/customers/:id` | Delete customer |
+| POST | `/api/customers/:id/daily` | Add/update daily record |
+| GET | `/api/customers/:id/report?month=2026-03` | Get monthly report |
+| POST | `/api/chat` | AI chat → intent + data |
+
+---
+
+## 📦 Data Model
+
+Each customer record:
+```json
+{
+  "id": "uuid",
+  "name": "Ahmed Khan",
+  "phone": "0321-1234567",
+  "extraInfo": "Nowshera, KPK",
+  "createdAt": "2026-03-04T...",
+  "dailyRecords": [
+    {
+      "date": "2026-03-04",
+      "items": [
+        { "description": "Atta 10kg", "qty": 2, "price": 1200 }
+      ],
+      "dayTotal": 2400,
+      "note": ""
+    }
+  ]
+}
+```
+
+Data is stored locally in `data/customers.json` via Node.js `fs` module. No cloud database required.
+
+---
+
+## 🤖 Recommended Ollama Model
+
+**`deepseek-v3.1:671b-cloud`** — excellent at following structured JSON instructions, bilingual (English + Roman Urdu).
