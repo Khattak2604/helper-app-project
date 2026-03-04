@@ -45,10 +45,8 @@ router.post('/apikey', async (req, res) => {
       if (status === 429) {
         return res.status(400).json({ success: false, message: 'API key is valid but rate limited. Try again in a moment.' });
       }
-      // For network errors or other issues, still save if format looks valid
-      if (!key.startsWith('AIza')) {
-        return res.status(400).json({ success: false, message: 'API key format looks invalid. Gemini keys typically start with "AIza".' });
-      }
+      // For network errors or other issues, pass through — we can't validate without connectivity
+      console.warn('Could not test API key against Gemini (network error):', testErr.message);
     }
 
     // Save to config.json

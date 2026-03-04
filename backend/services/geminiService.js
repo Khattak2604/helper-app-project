@@ -42,7 +42,7 @@ Today's date is ${new Date().toISOString().slice(0, 10)}.
 Always infer today's date for "today" commands. Always return valid JSON only.`;
 
 /**
- * Build a dynamic system prompt by appending active language pack additions.
+ * Build a dynamic system prompt by appending active language pack vocabulary.
  * @param {string[]} activeLanguageCodes - e.g. ["english", "roman-urdu"]
  * @returns {Promise<string>} - full combined system prompt
  */
@@ -51,7 +51,7 @@ async function buildSystemPrompt(activeLanguageCodes = []) {
   const langPacksDir = path.join(__dirname, '../../data/language-packs');
 
   for (const code of activeLanguageCodes) {
-    if (code === 'english') continue; // English is the base, no extra addition needed
+    if (code === 'english') continue; // English is the base, no extra vocabulary needed
     try {
       const packPath = path.join(langPacksDir, `${code}.json`);
       if (await fs.pathExists(packPath)) {

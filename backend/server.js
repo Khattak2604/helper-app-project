@@ -4,6 +4,7 @@ const dotenv = require('dotenv');
 const bodyParser = require('body-parser');
 const path = require('path');
 const fs = require('fs-extra');
+const rateLimit = require('express-rate-limit');
 
 dotenv.config();
 
@@ -45,9 +46,9 @@ app.use(express.static(path.join(__dirname, '../frontend')));
 
 // API Routes
 app.use('/api/customers', require('./routes/customers'));
-app.use('/api/chat', require('./routes/chat'));
-app.use('/api/config', require('./routes/config'));
-app.use('/api/languages', require('./routes/languages'));
+app.use('/api/chat', rateLimit({ windowMs: 60_000, max: 30, standardHeaders: true, legacyHeaders: false }), require('./routes/chat'));
+app.use('/api/config', rateLimit({ windowMs: 60_000, max: 20, standardHeaders: true, legacyHeaders: false }), require('./routes/config'));
+app.use('/api/languages', rateLimit({ windowMs: 60_000, max: 60, standardHeaders: true, legacyHeaders: false }), require('./routes/languages'));
 
 // Catch-all: serve frontend for non-API routes
 app.get('*', (req, res) => {

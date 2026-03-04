@@ -6,6 +6,7 @@ const { chatWithGemini, buildSystemPrompt, SHOP_LEDGER_SYSTEM_PROMPT } = require
 const db = require('../utils/dataStore');
 
 const CONFIG_FILE = path.join(__dirname, '../../data/config.json');
+const DEFAULT_LANGUAGES = ['english'];
 
 router.post('/', async (req, res) => {
   try {
@@ -27,7 +28,7 @@ router.post('/', async (req, res) => {
       if (await fs.pathExists(CONFIG_FILE)) {
         config = await fs.readJson(CONFIG_FILE);
       }
-      const activeLanguages = config.activeLanguages || ['english'];
+      const activeLanguages = config.activeLanguages || DEFAULT_LANGUAGES;
       systemPrompt = await buildSystemPrompt(activeLanguages);
     } catch (promptErr) {
       console.warn('Could not build dynamic system prompt, using base prompt:', promptErr.message);

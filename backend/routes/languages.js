@@ -7,6 +7,7 @@ const AVAILABLE_PACKS_FILE = path.join(__dirname, '../data/available-packs.json'
 const PACKS_SOURCE_DIR = path.join(__dirname, '../data/packs');
 const INSTALLED_PACKS_DIR = path.join(__dirname, '../../data/language-packs');
 const CONFIG_FILE = path.join(__dirname, '../../data/config.json');
+const DEFAULT_LANGUAGES = ['english'];
 
 async function getInstalledCodes() {
   await fs.ensureDir(INSTALLED_PACKS_DIR);
@@ -120,7 +121,7 @@ router.delete('/:code', async (req, res) => {
 router.get('/active', async (req, res) => {
   try {
     const config = await getConfig();
-    const activeLanguages = config.activeLanguages || ['english'];
+    const activeLanguages = config.activeLanguages || DEFAULT_LANGUAGES;
     res.json({ success: true, data: activeLanguages });
   } catch (err) {
     res.status(500).json({ success: false, message: err.message });
@@ -135,8 +136,8 @@ router.post('/active', async (req, res) => {
       return res.status(400).json({ success: false, message: 'activeLanguages must be an array.' });
     }
 
-    // Always include english
-    const codes = activeLanguages.includes('english') ? activeLanguages : ['english', ...activeLanguages];
+    // Always include english (DEFAULT_LANGUAGES)
+    const codes = activeLanguages.includes('english') ? activeLanguages : [...DEFAULT_LANGUAGES, ...activeLanguages];
 
     const config = await getConfig();
     config.activeLanguages = codes;

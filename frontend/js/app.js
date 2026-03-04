@@ -645,7 +645,9 @@ async function checkApiKeyStatus() {
     } else {
       $('apiKeyBanner').classList.remove('visible');
     }
-  } catch { /* server might not be up yet */ }
+  } catch (err) {
+    console.warn('Could not check API key status:', err.message);
+  }
 }
 
 function openSetupModal() {
@@ -863,22 +865,40 @@ async function handleActiveToggle(toggle, currentActiveCodes) {
 }
 
 function updateVoiceLang(activeCodes) {
-  // Use the voice code of the first non-English active language if available
-  const langPriorityMap = {
-    'roman-urdu': 'ur-PK',
-    'punjabi-roman': 'pa-PK',
-    'english': 'en-US'
-  };
-  for (const code of activeCodes) {
-    if (code !== 'english' && langPriorityMap[code]) {
-      voiceLang = langPriorityMap[code];
-      if (recognition) recognition.lang = voiceLang;
-      const btn = $('langToggle');
-      if (btn) {
-        btn.textContent = code === 'roman-urdu' ? 'اردو' : code === 'punjabi-roman' ? 'پنجابی' : 'EN';
-        btn.classList.toggle('urdu', code !== 'english');
+  // Use voiceCode from the available packs list (fetched async) if possible,
+  // otherwise fall back to a sensible default. We read from the DOM-rendered
+  // pack data via the voice code spans that were injected when the modal was rendered.
+  // For robustness, we also accept the voiceCode directly from the lang manager state.
+  const voiceCodeByCode = {};
+  document.querySelectorAll('[data-toggle]').forEach(toggle => {
+    const item = toggle.closest('.lang-active-item');
+    if (item) {
+      const voiceSpan = item.querySelector('.lang-voice-code');
+      if (voiceSpan) {
+        const code = toggle.dataset.toggle;
+        // text is "🎙️ ur-PK" — extract the code part
+        const match = voiceSpan.textContent.replace('🎙️', '').trim();
+        if (match) voiceCodeByCode[code] = match;
       }
-      return;
+    }
+  });
+
+  for (const code of activeCodes) {
+    if (code !== 'english') {
+      const langVoiceCode = voiceCodeByCode[code];
+      if (langVoiceCode) {
+        voiceLang = langVoiceCode;
+        if (recognition) recognition.lang = voiceLang;
+        const btn = $('langToggle');
+        if (btn) {
+          // Use the nativeName from the pack card if available
+          const packCard = $(`pack-card-${code}`);
+          const nativeName = packCard ? packCard.querySelector('.lang-pack-native')?.textContent : '';
+          btn.textContent = nativeName || langVoiceCode;
+          btn.classList.add('urdu');
+        }
+        return;
+      }
     }
   }
   // Default to English
